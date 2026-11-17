@@ -2,8 +2,10 @@
 // Serves the built SPA from dist/ and the auto_perf log API that vite.config.ts
 // provides in dev/preview mode (same routes, same path-validation rules).
 import { createReadStream, existsSync, statSync } from 'node:fs'
-import { readdir, readFile, stat, open } from 'node:fs/promises'
+import { readdir, stat, open } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
 const PORT = Number(process.env.PORT || 4173)
@@ -119,10 +121,26 @@ async function handleFile(req, res, url) {
   }
   if (!full.endsWith('.mlir')) return json(res, 400, { error: 'only .mlir files' })
   try {
-    const text = await readFile(full, 'utf-8')
-    json(res, 200, { path: file, text })
+    await stat(full)
   } catch (e) {
-    json(res, 404, { error: String(e) })
+    return json(res, 404, { error: String(e) })
+  }
+  // Stream the {"path":...,"text":"..."} body instead of readFile+JSON.stringify:
+  // a 60MB pass-IR dump buffered as a JS string plus its JSON copy peaks far above
+  // the 128M container cap and OOM-kills the server (browser sees Failed to fetch).
+  const dec = new TextDecoder()
+  const escRe = /["\\\x00-\x1f]/g
+  const esc = (s) => s.replace(escRe, (c) => JSON.stringify(c).slice(1, -1))
+  const encoder = new Transform({
+    transform(chunk, _enc, cb) { cb(null, esc(dec.decode(chunk, { stream: true }))) },
+    flush(cb) { cb(null, esc(dec.decode()) + '"}') },
+  })
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+  res.write('{"path":' + JSON.stringify(file) + ',"text":"')
+  try {
+    await pipeline(createReadStream(full), encoder, res)
+  } catch {
+    res.destroy() // headers already sent; truncate so the client fails fast
   }
 }
 
