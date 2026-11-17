@@ -50,6 +50,7 @@ dev/serve 均内置 API（vite.config.ts 的 autoPerfApi 插件 / docker/serve.m
   - `GET /api/autoperf/tasks` — 任务列表与文件清单（短 TTL 缓存）
   - `GET /api/autoperf/file?task=<name>&path=<rel>` — 读整个 .mlir
   - `GET /api/autoperf/head?task=<name>&path=<rel>&n=<bytes>` — 只读文件前 N 字节（模块名检测用）
+  - `GET /api/autoperf/count?task=<name>&path=<rel>` — 服务端流式统计节点估算 `{bytes, ops, maxOps, maxFunc}`；前端拉取前预检，最大函数超渲染上限即跳过下载
   - 均有路径校验，禁止越出日志根目录。
 
 ## 跨 pass 查看

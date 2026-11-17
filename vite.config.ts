@@ -1,7 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 import { readFile, open } from 'node:fs/promises'
-import { readdirSync, statSync } from 'node:fs'
+import { createReadStream, readdirSync, statSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 
 const LOG_ROOT = process.env.AUTO_PERF_LOG_DIR || '/tmp/auto_perf_logs'
@@ -60,6 +60,43 @@ function autoPerfMiddleware(req: any, res: any, next: () => void): void {
       })
     }
     return json(200, { root: LOG_ROOT, tasks })
+  }
+
+  if (url.pathname === '/api/autoperf/count') {
+    // pre-fetch estimate: SSA-def count + largest single function, streamed
+    // server-side so the client can skip oversized dumps without downloading
+    const task = url.searchParams.get('task') ?? ''
+    const file = url.searchParams.get('path') ?? ''
+    const base = resolve(LOG_ROOT, task)
+    const full = resolve(base, file)
+    if (!full.startsWith(resolve(LOG_ROOT) + sep) || !full.startsWith(base + sep)) {
+      return json(403, { error: 'path escapes log root' })
+    }
+    if (!full.endsWith('.mlir')) return json(400, { error: 'only .mlir files' })
+    void (async () => {
+      try {
+        const st = statSync(full)
+        let ops = 0, cur = 0, maxOps = 0, maxFunc: string | null = null, curFunc: string | null = null, rem = ''
+        const onLine = (line: string) => {
+          const f = /func\.func\s+@([\w.$-]+)/.exec(line)
+          if (f) {
+            if (curFunc && cur > maxOps) { maxOps = cur; maxFunc = curFunc }
+            curFunc = f[1]; cur = 0
+          } else if (/^\s*%[\w.$-]+\s*=/.test(line)) { cur++; ops++ }
+        }
+        for await (const chunk of createReadStream(full, 'utf8')) {
+          const lines = (rem + chunk).split('\n')
+          rem = lines.pop() ?? ''
+          for (const line of lines) onLine(line)
+        }
+        if (rem) onLine(rem)
+        if (curFunc && cur > maxOps) { maxOps = cur; maxFunc = curFunc }
+        json(200, { bytes: st.size, ops, maxOps, maxFunc })
+      } catch (e) {
+        json(404, { error: String(e) })
+      }
+    })()
+    return
   }
 
   if (url.pathname === '/api/autoperf/file' || url.pathname === '/api/autoperf/head') {

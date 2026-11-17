@@ -261,6 +261,16 @@ export default function App() {
     [],
   );
 
+  /** 拉取前预检：服务端流式统计节点估算（不下载文件体）；失败返回 null 则照常拉取 */
+  async function fetchFileCount(task: string, rel: string): Promise<{ ops: number; maxOps: number } | null> {
+    try {
+      const r = await fetch("/api/autoperf/count?task=" + encodeURIComponent(task) +
+        "&path=" + encodeURIComponent(rel));
+      if (!r.ok) return null;
+      return (await r.json()) as { ops: number; maxOps: number };
+    } catch { return null }
+  }
+
   // 按需加载：只拉取当前选中的 IR 文件（以及 diff 需要的上一个文件）
   const ensureTags = useCallback(
     async (tags: string[]) => {
@@ -271,8 +281,15 @@ export default function App() {
       const cache = { ...remote.cache };
       const raws = { ...remote.raws };
       let fail: string | null = null;
+      const skipped: string[] = [];
       for (const tag of missing) {
         try {
+          const est = await fetchFileCount(remote.task.name, tag);
+          if (est && est.maxOps > NODE_RENDER_LIMIT) {
+            skipped.push(tag.split("/").pop() + "(最大函数≈" + est.maxOps + ")");
+            cache[tag] = [];
+            continue;
+          }
           const { fns, text } = await fetchRemoteFunctions(remote.task.name, tag);
           cache[tag] = fns;
           raws[tag] = text;
@@ -283,7 +300,10 @@ export default function App() {
       }
       setRemote({ ...remote, cache, raws });
       setLoadingMsg(null);
-      if (fail) setError("部分文件读取失败: " + fail);
+      if (skipped.length) {
+        setError("已跳过 " + skipped.length + " 个超大 IR 文件（最大函数节点超上限 " + NODE_RENDER_LIMIT +
+          "，未下载）: " + skipped.join("、") + (fail ? "；另有失败: " + fail : ""));
+      } else if (fail) setError("部分文件读取失败: " + fail);
     },
     [remote, fetchRemoteFunctions],
   );

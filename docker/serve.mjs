@@ -108,6 +108,35 @@ async function handleHead(res, url) {
   }
 }
 
+// Pre-fetch estimate: stream the file once server-side (no download to the
+// client) counting SSA-def lines per function, so the frontend can skip dumps
+// whose largest function already exceeds the render node limit.
+const COUNT_FUNC_RE = /func\.func\s+@([\w.$-]+)/
+const COUNT_DEF_RE = /^\s*%[\w.$-]+\s*=/
+
+async function handleCount(res, url) {
+  const full = resolveInLogRoot(url.searchParams.get('task') ?? '', url.searchParams.get('path') ?? '')
+  if (!full) return json(res, 403, { error: 'path escapes log root' })
+  let st
+  try { st = await stat(full) } catch (e) { return json(res, 404, { error: String(e) }) }
+  let ops = 0, cur = 0, maxOps = 0, maxFunc = null, curFunc = null, rem = ''
+  const onLine = (line) => {
+    const f = COUNT_FUNC_RE.exec(line)
+    if (f) {
+      if (curFunc && cur > maxOps) { maxOps = cur; maxFunc = curFunc }
+      curFunc = f[1]; cur = 0
+    } else if (COUNT_DEF_RE.test(line)) { cur++; ops++ }
+  }
+  for await (const chunk of createReadStream(full, 'utf8')) {
+    const lines = (rem + chunk).split('\n')
+    rem = lines.pop() ?? ''
+    for (const line of lines) onLine(line)
+  }
+  if (rem) onLine(rem)
+  if (curFunc && cur > maxOps) { maxOps = cur; maxFunc = curFunc }
+  json(res, 200, { bytes: st.size, ops, maxOps, maxFunc })
+}
+
 // Same containment rules as vite.config.ts: resolved path must stay inside
 // LOG_ROOT/<task>/ and only .mlir files are readable.
 async function handleFile(req, res, url) {
@@ -170,6 +199,7 @@ createServer((req, res) => {
   if (url.pathname === '/api/autoperf/tasks') return handleTasks(res)
   if (url.pathname === '/api/autoperf/file') return handleFile(req, res, url)
   if (url.pathname === '/api/autoperf/head') return handleHead(res, url)
+  if (url.pathname === '/api/autoperf/count') return handleCount(res, url)
   if (url.pathname.startsWith('/api/')) return json(res, 404, { error: 'not found' })
   serveStatic(req, res, url.pathname)
 }).listen(PORT, () => console.log(`pycircuit-graph serving ${DIST} + logs ${LOG_ROOT} on :${PORT}`))
