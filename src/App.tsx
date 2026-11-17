@@ -873,6 +873,7 @@ export default function App() {
             edges={graph.edges}
             layout={layout}
             hoveredNode={hoveredNode}
+            focusNode={selected?.id ?? null}
             showLabels={showLabels}
             onNodeClick={(n) => setSelected(n)}
             onNodeContextmenu={(n) => {

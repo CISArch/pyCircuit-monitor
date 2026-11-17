@@ -61,13 +61,15 @@ export default function G6Canvas(props: {
   edges: G6Edge[];
   layout: Layout;
   hoveredNode: string | null;
+  /** 点击选中的节点 id：高亮它及上下游直连边/邻点，其余淡化；null 清除 */
+  focusNode?: string | null;
   /** 是否显示节点标签（标签会撑大 bubble-sets 的成员包围盒，使气泡显著变大） */
   showLabels?: boolean;
   onNodeClick: (n: G6Node | null) => void;
   /** 右键节点（用于展开/收起 comb 聚合节点） */
   onNodeContextmenu?: (n: G6Node) => void;
 }) {
-  const { nodes, edges, layout, hoveredNode, showLabels = true, onNodeClick, onNodeContextmenu } = props;
+  const { nodes, edges, layout, hoveredNode, focusNode = null, showLabels = true, onNodeClick, onNodeContextmenu } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Graph | null>(null);
   const nodeById = useRef(new Map<string, G6Node>());
@@ -92,6 +94,51 @@ export default function G6Canvas(props: {
     }
     prevHover.current = hoveredNode;
   }, [hoveredNode, nodes]);
+
+  // 点击高亮：选中节点 + 上下游直连边与邻点保持醒目，其余节点/边淡化；
+  // 只更新受影响（上次+这次）的元素，5k 节点图上点击也不做全量刷新
+  const prevFocus = useRef<{ nodes: Set<string>; edges: Set<string> }>({ nodes: new Set(), edges: new Set() });
+  useEffect(() => {
+    const g = graphRef.current;
+    if (!g || g.destroyed) return;
+    const focus = focusNode ?? null;
+    const hitNodes = new Set<string>();
+    const hitEdges = new Set<string>();
+    if (focus) {
+      hitNodes.add(focus);
+      for (const e of edges) {
+        if (e.source === focus || e.target === focus) {
+          hitEdges.add(e.id);
+          hitNodes.add(e.source);
+          hitNodes.add(e.target);
+        }
+      }
+    }
+    const nodeUpdates: any[] = [];
+    const edgeUpdates: any[] = [];
+    for (const id of new Set([...prevFocus.current.nodes, ...hitNodes])) {
+      if (!g.getNodeData(id)) continue;
+      nodeUpdates.push({
+        id,
+        style: {
+          opacity: focus ? (hitNodes.has(id) ? 1 : 0.15) : 1,
+          stroke: id === focus ? "#ffb300" : NODE_STROKE,
+          lineWidth: id === focus ? 3 : 1,
+        },
+      });
+    }
+    for (const id of new Set([...prevFocus.current.edges, ...hitEdges])) {
+      if (!g.getEdgeData(id)) continue;
+      edgeUpdates.push({
+        id,
+        style: { opacity: focus ? (hitEdges.has(id) ? 1 : 0.08) : 1, lineWidth: hitEdges.has(id) ? 2.2 : 1 },
+      });
+    }
+    prevFocus.current = { nodes: hitNodes, edges: hitEdges };
+    if (nodeUpdates.length) g.updateNodeData(nodeUpdates);
+    if (edgeUpdates.length) g.updateEdgeData(edgeUpdates);
+    if (nodeUpdates.length || edgeUpdates.length) g.draw();
+  }, [focusNode, nodes, edges]);
 
   // 创建 / 销毁 Graph 实例（一次）
   useEffect(() => {
