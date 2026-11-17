@@ -61,7 +61,7 @@ export default function G6Canvas(props: {
   edges: G6Edge[];
   layout: Layout;
   hoveredNode: string | null;
-  /** 点击选中的节点 id：高亮它及上下游直连边/邻点，其余淡化；null 清除 */
+  /** 点击选中的节点 id：高亮它及上下游直连边/邻点（黄色，其余元素保持默认）；null 清除 */
   focusNode?: string | null;
   /** 是否显示节点标签（标签会撑大 bubble-sets 的成员包围盒，使气泡显著变大） */
   showLabels?: boolean;
@@ -95,8 +95,8 @@ export default function G6Canvas(props: {
     prevHover.current = hoveredNode;
   }, [hoveredNode, nodes]);
 
-  // 点击高亮：选中节点 + 上下游直连边与邻点保持醒目，其余节点/边淡化；
-  // 只更新受影响（上次+这次）的元素，5k 节点图上点击也不做全量刷新
+  // 点击高亮：只给选中节点(黄填充)与上下游直连边/邻点(黄描边)上色，
+  // 其余元素保持默认显示不动（恢复时按 nodes/edges 原始配色还原）
   const prevFocus = useRef<{ nodes: Set<string>; edges: Set<string> }>({ nodes: new Set(), edges: new Set() });
   useEffect(() => {
     const g = graphRef.current;
@@ -114,24 +114,32 @@ export default function G6Canvas(props: {
         }
       }
     }
+    const fillOf = new Map(nodes.map((n) => [n.id, n.fill]));
+    const strokeOf = new Map(edges.map((e) => [e.id, e.fill ?? EDGE_STROKE]));
     const nodeUpdates: any[] = [];
     const edgeUpdates: any[] = [];
     for (const id of new Set([...prevFocus.current.nodes, ...hitNodes])) {
       if (!g.getNodeData(id)) continue;
+      const isFocus = id === focus;
       nodeUpdates.push({
         id,
-        style: {
-          opacity: focus ? (hitNodes.has(id) ? 1 : 0.15) : 1,
-          stroke: id === focus ? "#ffb300" : NODE_STROKE,
-          lineWidth: id === focus ? 3 : 1,
-        },
+        style: hitNodes.has(id)
+          ? {
+              opacity: 1,
+              ...(isFocus ? { fill: "#ffca28" } : {}),
+              stroke: "#ffb300",
+              lineWidth: isFocus ? 2.5 : 2,
+            }
+          : { opacity: 1, fill: fillOf.get(id) ?? "#455a64", stroke: NODE_STROKE, lineWidth: 1 },
       });
     }
     for (const id of new Set([...prevFocus.current.edges, ...hitEdges])) {
       if (!g.getEdgeData(id)) continue;
       edgeUpdates.push({
         id,
-        style: { opacity: focus ? (hitEdges.has(id) ? 1 : 0.08) : 1, lineWidth: hitEdges.has(id) ? 2.2 : 1 },
+        style: hitEdges.has(id)
+          ? { opacity: 1, stroke: "#ffb300", lineWidth: 2.2 }
+          : { opacity: 1, stroke: strokeOf.get(id) ?? EDGE_STROKE, lineWidth: 1 },
       });
     }
     prevFocus.current = { nodes: hitNodes, edges: hitEdges };
