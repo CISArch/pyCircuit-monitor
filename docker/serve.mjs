@@ -110,22 +110,32 @@ async function handleHead(res, url) {
 
 // Pre-fetch estimate: stream the file once server-side (no download to the
 // client) counting SSA-def lines per function, so the frontend can skip dumps
-// whose largest function already exceeds the render node limit.
+// whose largest function already exceeds the render node limit. A pyc.comb
+// region counts as ONE node (the UI renders combs collapsed), matching the
+// render-limit semantics instead of raw op count.
 const COUNT_FUNC_RE = /func\.func\s+@([\w.$-]+)/
-const COUNT_DEF_RE = /^\s*%[\w.$-]+\s*=/
+const COUNT_DEF_RE = /^\s*%[\w.$-]+(:\d+)?\s*=/
+const COUNT_COMB_RE = /^\s*%[\w.$-]+(:\d+)?\s*=\s*pyc\.comb\b/
+// wire/alias are passthrough nodes the renderer bypasses (graphBuild.ts), so
+// they never appear in the collapsed graph the render limit is measured on.
+const COUNT_SKIP_RE = /^\s*%[\w.$-]+(:\d+)?\s*=\s*pyc\.(wire|alias)\b/
 
 async function handleCount(res, url) {
   const full = resolveInLogRoot(url.searchParams.get('task') ?? '', url.searchParams.get('path') ?? '')
   if (!full) return json(res, 403, { error: 'path escapes log root' })
   let st
   try { st = await stat(full) } catch (e) { return json(res, 404, { error: String(e) }) }
-  let ops = 0, cur = 0, maxOps = 0, maxFunc = null, curFunc = null, rem = ''
+  let ops = 0, cur = 0, maxOps = 0, maxFunc = null, curFunc = null, rem = '', combDepth = 0
+  const braces = (line) => (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length
   const onLine = (line) => {
+    if (combDepth > 0) { combDepth += braces(line); return }
     const f = COUNT_FUNC_RE.exec(line)
     if (f) {
       if (curFunc && cur > maxOps) { maxOps = cur; maxFunc = curFunc }
       curFunc = f[1]; cur = 0
-    } else if (COUNT_DEF_RE.test(line)) { cur++; ops++ }
+    } else if (COUNT_COMB_RE.test(line)) {
+      cur++; ops++; combDepth = braces(line)
+    } else if (COUNT_DEF_RE.test(line) && !COUNT_SKIP_RE.test(line)) { cur++; ops++ }
   }
   for await (const chunk of createReadStream(full, 'utf8')) {
     const lines = (rem + chunk).split('\n')

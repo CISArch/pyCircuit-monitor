@@ -76,13 +76,17 @@ function autoPerfMiddleware(req: any, res: any, next: () => void): void {
     void (async () => {
       try {
         const st = statSync(full)
-        let ops = 0, cur = 0, maxOps = 0, maxFunc: string | null = null, curFunc: string | null = null, rem = ''
+        let ops = 0, cur = 0, maxOps = 0, maxFunc: string | null = null, curFunc: string | null = null, rem = '', combDepth = 0
+        const braces = (line: string) => (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length
         const onLine = (line: string) => {
+          if (combDepth > 0) { combDepth += braces(line); return } // comb region: whole comb = 1 node (rendered collapsed)
           const f = /func\.func\s+@([\w.$-]+)/.exec(line)
           if (f) {
             if (curFunc && cur > maxOps) { maxOps = cur; maxFunc = curFunc }
             curFunc = f[1]; cur = 0
-          } else if (/^\s*%[\w.$-]+\s*=/.test(line)) { cur++; ops++ }
+          } else if (/^\s*%[\w.$-]+(:\d+)?\s*=\s*pyc\.comb\b/.test(line)) {
+            cur++; ops++; combDepth = braces(line)
+          } else if (/^\s*%[\w.$-]+(:\d+)?\s*=/.test(line) && !/^\s*%[\w.$-]+(:\d+)?\s*=\s*pyc\.(wire|alias)\b/.test(line)) { cur++; ops++ }
         }
         for await (const chunk of createReadStream(full, 'utf8')) {
           const lines = (rem + chunk).split('\n')
