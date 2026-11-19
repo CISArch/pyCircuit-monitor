@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  displayStatus, fetchHealth, fetchLog, fetchQueue, fetchTask, fetchTasks,
+  displayStatus, fetchHealth, fetchLogPage, fetchQueue, fetchTask, fetchTasks,
   fmtDur, fmtNum, fmtTime,
-  type DisplayStatus, type Health, type Queue, type TaskDetail, type TaskSummary,
+  type DisplayStatus, type Health, type LogPage, type Queue, type TaskDetail, type TaskSummary,
 } from "./api";
 
 const STATUS_META: Record<DisplayStatus, { label: string; cls: string }> = {
@@ -87,11 +87,16 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [fullLog, setFullLog] = useState<string | null>(null);
+  const [logPage, setLogPage] = useState<LogPage | null>(null);
+  const [logPageSize, setLogPageSize] = useState(100);
+  const [logLoading, setLogLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [branchFilter, setBranchFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
-  const logBoxRef = useRef<HTMLPreElement>(null);
+  const logStateRef = useRef<LogPage | null>(null);
+  logStateRef.current = logPage;
+  const logPageSizeRef = useRef(100);
+  logPageSizeRef.current = logPageSize;
 
   // ---- polling ----
   const refresh = useCallback(async () => {
@@ -123,7 +128,7 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
     setDetailLoading(false);
   }, []);
   useEffect(() => {
-    if (!selected) { setDetail(null); setFullLog(null); return; }
+    if (!selected) { setDetail(null); setLogPage(null); return; }
     void loadDetail(selected);
     const running = tasks.find((t) => t.name === selected && !t.hasResult);
     const t = setInterval(() => {
@@ -132,10 +137,28 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
     return () => clearInterval(t);
   }, [selected, loadDetail]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 运行中任务日志自动滚动到底部
+  // ---- execution.log 分页查看（整页翻页，无内部滚动条） ----
+  const loadLogPage = useCallback(async (name: string, page: number | "last", size: number) => {
+    setLogLoading(true);
+    const d = await fetchLogPage(name, "execution.log", page, size);
+    setLogPage(d);
+    setLogLoading(false);
+  }, []);
+  // 切任务 / 改每页行数：回到末页（最新内容）
   useEffect(() => {
-    if (logBoxRef.current && detail && !detail.result) logBoxRef.current.scrollTop = logBoxRef.current.scrollHeight;
-  }, [detail]);
+    if (!selected) { setLogPage(null); return; }
+    void loadLogPage(selected, "last", logPageSize);
+  }, [selected, logPageSize, loadLogPage]);
+  // 运行中任务：停在末页时 5s 跟随最新；翻到历史页则不打扰
+  const selRunning = !!(detail && !detail.result);
+  useEffect(() => {
+    if (!selected || !selRunning) return;
+    const t = setInterval(() => {
+      const st = logStateRef.current;
+      if (!st || st.page >= st.totalPages) void loadLogPage(selected, "last", logPageSizeRef.current);
+    }, 5000);
+    return () => clearInterval(t);
+  }, [selected, selRunning, loadLogPage]);
 
   // ---- derived table ----
   const rows = useMemo(() => {
@@ -170,12 +193,6 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
 
   const counts = health?.counts;
   const botUp = health?.ok === true;
-
-  const openFullLog = useCallback(async () => {
-    if (!selected) return;
-    const d = await fetchLog(selected, "execution.log");
-    setFullLog(d?.text ?? "（读取日志失败）");
-  }, [selected]);
 
   const selTask = tasks.find((t) => t.name === selected) ?? null;
   const selStatus = selTask ? displayStatus(selTask, health, newestNoResult) : null;
@@ -339,7 +356,7 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
                 {detail.files.length > 0 && (
                   <button className="mini" onClick={() => onOpenGraph(selected)}>在 IR 图谱中查看 {detail.files.length} 个 pass dump →</button>
                 )}
-                <button className="mini" onClick={() => void openFullLog()}>execution.log</button>
+                <button className="mini" onClick={() => void loadLogPage(selected, logPage?.page ?? "last", logPageSize)}>刷新日志</button>
               </div>
 
               {detail.result && detail.result.error && (
@@ -384,13 +401,42 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
                 </div>
               ) : null}
 
-              {/* 日志（运行中实时 tail / 完整日志按需） */}
+              {/* execution.log 分页查看（整页翻页，无内部滚动条） */}
               <div className="logwrap">
                 <div className="loghead">
-                  {detail.result ? "日志尾部" : "实时日志（5s 轮询，自动滚动）"}
-                  <span className="dim">{fmtNum(detail.logSize / 1024, 1)} KB{fullLog ? "（已展开完整日志）" : ""}</span>
+                  <span>execution.log{selRunning ? <span className="badge st-running" style={{ marginLeft: 8 }}>跟随最新 · 5s</span> : null}</span>
+                  <span className="dim">{logLoading ? "加载中…" : ""}</span>
                 </div>
-                <pre ref={logBoxRef} className="logbox">{fullLog ?? detail.logTail ?? "（无 execution.log）"}</pre>
+                {logPage ? (
+                  <>
+                    <div className="logpage">
+                      {logPage.lines.length
+                        ? logPage.lines.map((l, i) => (
+                          <div className="logline" key={i}>
+                            <span className="ln">{logPage.startLine + i}</span>
+                            <span className="lv">{l || " "}</span>
+                          </div>
+                        ))
+                        : <div className="dim" style={{ padding: "6px 0" }}>（空日志）</div>}
+                    </div>
+                    <div className="logpager">
+                      <button className="mini" disabled={logPage.page <= 1} onClick={() => void loadLogPage(selected, 1, logPageSize)}>首页</button>
+                      <button className="mini" disabled={logPage.page <= 1} onClick={() => void loadLogPage(selected, logPage.page - 1, logPageSize)}>◀ 上一页</button>
+                      <span className="dim">第 <b className="pgv">{logPage.page}</b> / {logPage.totalPages} 页</span>
+                      <button className="mini" disabled={logPage.page >= logPage.totalPages} onClick={() => void loadLogPage(selected, logPage.page + 1, logPageSize)}>下一页 ▶</button>
+                      <button className="mini" disabled={logPage.page >= logPage.totalPages} onClick={() => void loadLogPage(selected, "last", logPageSize)}>末页</button>
+                      <select value={logPageSize} onChange={(e) => setLogPageSize(Number(e.target.value))} title="每页行数">
+                        <option value={50}>50 行/页</option>
+                        <option value={100}>100 行/页</option>
+                        <option value={200}>200 行/页</option>
+                        <option value={500}>500 行/页</option>
+                      </select>
+                      <span className="dim">共 {logPage.totalLines} 行 · {fmtNum(logPage.size / 1024, 1)} KB{logPage.truncated ? " · 文件超 8MB，仅保留尾部窗口" : ""}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="dim">日志加载中…</div>
+                )}
               </div>
             </div>
           )}

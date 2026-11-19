@@ -239,10 +239,16 @@ button.more { margin-top: 8px; align-self: center; }
 .spark.empty { color: #55677e; font-size: 12px; }
 
 .logwrap { display: flex; flex-direction: column; gap: 4px; }
-.loghead { font-size: 12px; color: #8fa0b5; display: flex; justify-content: space-between; }
-.logbox {
-  margin: 0; background: #05070b; border: 1px solid #1a2230; border-radius: 8px;
-  padding: 8px 10px; max-height: 300px; overflow: auto;
+.loghead { font-size: 12px; color: #8fa0b5; display: flex; justify-content: space-between; align-items: center; }
+/* 分页日志：整页渲染、行号前缀，无内部滚动条（翻页代替滚动） */
+.logpage {
+  background: #05070b; border: 1px solid #1a2230; border-radius: 8px;
+  padding: 8px 10px;
   font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; line-height: 1.45;
-  color: #a8b7c7; white-space: pre-wrap; word-break: break-all;
 }
+.logline { display: flex; }
+.logline .ln { width: 56px; min-width: 56px; text-align: right; padding-right: 10px; color: #46586c; user-select: none; }
+.logline .lv { flex: 1; color: #a8b7c7; white-space: pre-wrap; word-break: break-all; }
+.logpager { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.logpager .pgv { color: #4dd0e1; }
+.logpager select { background: #0d1117; color: #c9d6e3; border: 1px solid #232c3b; border-radius: 6px; padding: 2px 6px; font-size: 12px; }

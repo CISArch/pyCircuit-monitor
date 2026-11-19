@@ -315,6 +315,8 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
         return json(res, 400, { error: 'only .log/.txt/.json/.jsonl/.csv files' })
       }
       const CAP = 8 * 1024 * 1024
+      const pageRaw = url.searchParams.get('page')
+      const pageSize = Math.min(Math.max(Number(url.searchParams.get('lines')) || 100, 20), 500)
       void (async () => {
         try {
           const st = await stat(full)
@@ -324,12 +326,31 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
             const len = Math.min(CAP, st.size)
             const buf = Buffer.alloc(len)
             const { bytesRead } = await fh.read(buf, 0, len, st.size - len)
-            json(res, 200, {
-              path: file,
-              size: st.size,
-              truncated: st.size > CAP,
-              text: buf.subarray(0, bytesRead).toString('utf-8'),
-            })
+            const text = buf.subarray(0, bytesRead).toString('utf-8')
+            const truncated = st.size > CAP
+            if (pageRaw !== null) {
+              // paginated mode: page is 1-based, or "last" for the newest page;
+              // pages are counted over the (up to 8MB) tail window
+              const all = text.length ? text.split('\n') : []
+              if (all.length > 1 && all[all.length - 1] === '') all.pop()
+              const totalPages = Math.max(1, Math.ceil(all.length / pageSize))
+              const page =
+                pageRaw === 'last' ? totalPages : Math.min(Math.max(Number(pageRaw) || 1, 1), totalPages)
+              const start = (page - 1) * pageSize
+              return json(res, 200, {
+                path: file,
+                size: st.size,
+                truncated,
+                totalLines: all.length,
+                totalPages,
+                page,
+                pageSize,
+                startLine: start + 1,
+                lines: all.slice(start, start + pageSize),
+              })
+            }
+            // legacy full-text mode
+            return json(res, 200, { path: file, size: st.size, truncated, text })
           } finally {
             await fh.close()
           }

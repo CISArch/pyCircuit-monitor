@@ -17,14 +17,14 @@ pyCircuit 的**测试监控台 + IR 可视化**统一前端。前身 pyCircuit-g
 - **历史列表**：全部 `task-*` 目录（含 result.json 摘要：状态 / 分支 / SHA /
   P/V 与 cycle/s 几何均值 / MATCH 数 / 耗时），状态与分支过滤，10s 自动刷新。
 - **任务详情**：逐 trace 双后端对比表（cycle/s / Verilator cycle/s / P/V / MATCH）、
-  同分支 P/V 与 cycle/s 走势图（内联 SVG，可点击跳转）、execution.log 查看、
+  同分支 P/V 与 cycle/s 走势图（内联 SVG，可点击跳转）、execution.log 分页查看（带行号整页翻页，无内部滚动条；默认末页，运行中任务 5s 跟随最新页）、
   一键「在 IR 图谱中查看」该任务的 pass dump 时间线。
 
 ### API（dev 与容器共用 `server/api.ts`，零 npm 依赖）
 
 - `GET /api/autoperf/tasks` — 任务列表 + result.json 摘要（gmCps/gmPV/MATCH/耗时，3s 缓存）
 - `GET /api/autoperf/task?name=<dir>` — 完整 result.json + execution.log 尾部 + 文件清单
-- `GET /api/autoperf/log?task=<dir>&path=<rel>` — 原文日志（.log/.txt/.json/.csv，8MB 上限）
+- `GET /api/autoperf/log?task=<dir>&path=<rel>&page=<N|last>&lines=<M>` — 日志分页读取（.log/.txt/.json/.csv；页码 1 起或 `last`=末页，每页 20–500 行，按 8MB 尾部窗口计页；不带 page 参数返回全文 text）
 - `GET /api/autoperf/health` — 代理机器人 `/api/health`（`AUTO_PERF_API_BASE`，默认 `127.0.0.1:8790`）
 - `GET /api/autoperf/queue` — 机器人 SQLite 状态库的 pending/running 明细（可选，容器内不可用时返回 `available:false`）
 - `GET /api/autoperf/file|head|count?task=<name>&path=<rel>` — .mlir 读取（大文件流式，见 IR 图谱一节）

@@ -100,14 +100,29 @@ async function getJson<T>(url: string): Promise<T | null> {
   }
 }
 
+export interface LogPage {
+  path: string;
+  size: number;
+  truncated: boolean;
+  totalLines: number;
+  totalPages: number;
+  page: number;
+  pageSize: number;
+  startLine: number;
+  lines: string[];
+}
+
 export const fetchTasks = () => getJson<{ root: string; tasks: TaskSummary[] }>("/api/autoperf/tasks");
 export const fetchHealth = () => getJson<Health>("/api/autoperf/health");
 export const fetchQueue = () => getJson<Queue>("/api/autoperf/queue");
 export const fetchTask = (name: string) =>
   getJson<TaskDetail>("/api/autoperf/task?name=" + encodeURIComponent(name));
-export const fetchLog = (task: string, path: string) =>
-  getJson<{ path: string; text: string; size: number; truncated: boolean }>(
-    "/api/autoperf/log?task=" + encodeURIComponent(task) + "&path=" + encodeURIComponent(path),
+export const fetchLogPage = (task: string, path: string, page: number | "last", lines: number) =>
+  getJson<LogPage>(
+    "/api/autoperf/log?task=" + encodeURIComponent(task) +
+    "&path=" + encodeURIComponent(path) +
+    "&page=" + encodeURIComponent(String(page)) +
+    "&lines=" + encodeURIComponent(String(lines)),
   );
 
 /** 展示状态：无 result.json 的目录，若机器人在跑且这是最新目录则视为 running，否则 interrupted。 */
