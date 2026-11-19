@@ -252,3 +252,16 @@ button.more { margin-top: 8px; align-self: center; }
 .logpager { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
 .logpager .pgv { color: #4dd0e1; }
 .logpager select { background: #0d1117; color: #c9d6e3; border: 1px solid #232c3b; border-radius: 6px; padding: 2px 6px; font-size: 12px; }
+
+/* 历史表：标题行紧凑状态 + 分页条 */
+.histcount { color: #8fa0b5; font-size: 12px; font-weight: 400; }
+.histchips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.histchips .chip { opacity: 1; cursor: default; font-size: 11.5px; padding: 2px 9px; }
+.histchips .chip.st-pass { color: #81c784; border-color: #2e5233; }
+.histchips .chip.st-partial { color: #ffb74d; border-color: #5c4514; }
+.histchips .chip.st-fail { color: #e57373; border-color: #5c2b2b; }
+.histchips .chip.st-timeout { color: #ba68c8; border-color: #4a2a52; }
+.histchips .chip.st-running { color: #4dd0e1; border-color: #1c4a55; }
+.histchips .chip.st-interrupted { color: #9fb0c4; border-color: #232c3b; }
+.histpager { justify-content: center; padding-top: 8px; }
+.dashcard .cardtitle .filters { margin-left: auto; }
