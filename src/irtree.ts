@@ -62,6 +62,25 @@ export function parseDumpName(rel: string): ParsedDump | null {
   };
 }
 
+/** Older pycc dumpers numbered before/after from one stack shared by the
+ *  parallel func-pass threads, so an after file may carry another instance's
+ *  <NN>/level. Re-pair each after with the latest open before of the same pass
+ *  and module, and give it that before's instance identity. */
+export function pairDumps(dumps: ParsedDump[], moduleOf: (tag: string) => string | undefined): ParsedDump[] {
+  const open = new Map<string, ParsedDump[]>();
+  return [...dumps].sort((a, b) => a.seq - b.seq).map((d) => {
+    const key = d.pass + "@" + (moduleOf(d.tag) ?? "");
+    const stack = open.get(key) ?? [];
+    open.set(key, stack);
+    if (d.phase === "before") {
+      stack.push(d);
+      return d;
+    }
+    const b = stack.pop();
+    return b ? { ...d, inner: b.inner, level: b.level, chain: b.chain } : d;
+  });
+}
+
 export function buildTree(dumps: ParsedDump[]): TreeNode {
   const root: TreeNode = { key: "__root__", label: "pass_ir", children: [], dumps: [], firstSeq: Number.MAX_SAFE_INTEGER };
   for (const d of [...dumps].sort((a, b) => a.seq - b.seq)) {

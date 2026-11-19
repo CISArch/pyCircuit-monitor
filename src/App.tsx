@@ -2,7 +2,7 @@ import { Component, useCallback, useEffect, useMemo, useRef, useState, type Reac
 import G6Canvas, { type G6Node, type G6Edge } from "./G6Canvas";
 import type { IRDoc, IRFunction, IRPass } from "./ir";
 import { KIND_COLORS, KIND_LABELS, LAYOUTS, normalizeKind, type Layout } from "./ir";
-import { buildTree, defaultExpanded, parseDumpName, type ParsedDump, type TreeNode } from "./irtree";
+import { buildTree, defaultExpanded, pairDumps, parseDumpName, type ParsedDump, type TreeNode } from "./irtree";
 import { functionToGraph, edgeSig } from "./graphBuild";
 
 type VNode = G6Node;
@@ -215,6 +215,7 @@ export default function App() {
 
   // 每 15s 轮询 auto_perf 日志目录，新任务/新 IR 自动出现
   useEffect(() => {
+    void refreshTasks();
     const t = setInterval(() => void refreshTasks(), 15000);
     return () => clearInterval(t);
   }, [refreshTasks]);
@@ -422,8 +423,9 @@ export default function App() {
   }, [moduleFilter, visibleFiles]);
   // IR 文件按 PassIRDumper 命名组织成执行树（via 链 = 嵌套 pass 实例路径）
   const dumps: ParsedDump[] = useMemo(
-    () => (visibleFiles.map(parseDumpName).filter((d): d is ParsedDump => !!d)),
-    [visibleFiles],
+    () => pairDumps(visibleFiles.map(parseDumpName).filter((d): d is ParsedDump => !!d),
+      (tag) => moduleMap.get(tag)),
+    [visibleFiles, moduleMap],
   );
   const irTree = useMemo(() => (dumps.length ? buildTree(dumps) : null), [dumps]);
 
