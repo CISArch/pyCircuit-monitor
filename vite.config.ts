@@ -18,6 +18,13 @@ function autoPerfApiPlugin(): Plugin {
 }
 
 // https://vite.dev/config/
+// Build stamp in UTC+8 (docker builds run in UTC) shown in the top nav so
+// stale tabs are easy to spot.
+const buildStamp = new Date(Date.now() + 8 * 3600_000).toISOString().replace('T', ' ').slice(0, 16)
+
 export default defineConfig({
+  define: {
+    __BUILD_ID__: JSON.stringify(buildStamp),
+  },
   plugins: [react(), autoPerfApiPlugin()],
 })

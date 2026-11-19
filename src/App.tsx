@@ -2,6 +2,8 @@ import { useCallback, useState } from "react";
 import Dashboard from "./Dashboard";
 import GraphView from "./GraphView";
 
+declare const __BUILD_ID__: string;
+
 type View = "monitor" | "graph";
 
 function readView(): View {
@@ -35,7 +37,7 @@ export default function App() {
         <strong className="brand">pyCircuit Monitor</strong>
         <button className={view === "monitor" ? "on" : ""} onClick={openMonitor}>监控台</button>
         <button className={view === "graph" ? "on" : ""} onClick={() => openGraph()}>IR 图谱</button>
-        <span className="topnote">auto_perf 实时状态 · 历史与结果 · IR pass 可视化</span>
+        <span className="topnote">auto_perf 实时状态 · 历史与结果 · IR pass 可视化 · 构建 {__BUILD_ID__}</span>
       </nav>
       <div className="viewbody">
         {view === "monitor"
