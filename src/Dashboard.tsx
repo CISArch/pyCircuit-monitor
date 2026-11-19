@@ -97,6 +97,8 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
   logStateRef.current = logPage;
   const logPageSizeRef = useRef(100);
   logPageSizeRef.current = logPageSize;
+  const detailRef = useRef<HTMLDivElement>(null);
+  const autoPickedRef = useRef(false);
 
   // ---- polling ----
   const refresh = useCallback(async () => {
@@ -120,6 +122,13 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
     [tasks, health, newestNoResult],
   );
 
+  // 首屏自动选中正在运行的任务：打开页面直接看到实时日志，不用先点
+  useEffect(() => {
+    if (autoPickedRef.current || selected || !runningTask) return;
+    autoPickedRef.current = true;
+    setSelected(runningTask.name);
+  }, [runningTask, selected]);
+
   // ---- detail loading (auto-refresh while running) ----
   const loadDetail = useCallback(async (name: string) => {
     setDetailLoading(true);
@@ -136,6 +145,13 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
     }, running ? 5000 : 15000);
     return () => clearInterval(t);
   }, [selected, loadDetail]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 选中任务后把详情面板滚进视野（详情在历史表上方，选中即见）
+  useEffect(() => {
+    if (!selected) return;
+    const t = setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
+    return () => clearTimeout(t);
+  }, [selected]);
 
   // ---- execution.log 分页查看（整页翻页，无内部滚动条） ----
   const loadLogPage = useCallback(async (name: string, page: number | "last", size: number) => {
@@ -255,78 +271,9 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
         </div>
       </div>
 
-      {/* ============ 历史列表 ============ */}
-      <div className="dashcard">
-        <div className="cardtitle">
-          测试历史（{rows.length} 个任务，10s 自动刷新）
-          <span className="filters">
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="all">全部状态</option>
-              <option value="pass">PASS</option>
-              <option value="partial">PARTIAL</option>
-              <option value="fail">FAIL</option>
-              <option value="timeout">TIMEOUT</option>
-              <option value="running">运行中</option>
-              <option value="interrupted">已中断</option>
-            </select>
-            <input
-              className="branchq"
-              placeholder="按分支 / SHA / 目录过滤…"
-              value={branchFilter}
-              onChange={(e) => setBranchFilter(e.target.value)}
-            />
-          </span>
-        </div>
-        <div className="tablewrap">
-          <table className="tasktable">
-            <thead>
-              <tr>
-                <th>状态</th>
-                <th>时间</th>
-                <th>分支</th>
-                <th>SHA</th>
-                <th className="num">P/V 几何均值</th>
-                <th className="num">cycle/s 几何均值</th>
-                <th className="num">MATCH</th>
-                <th className="num">总时长</th>
-                <th>IR</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRows.map((t) => {
-                const st = displayStatus(t, health, newestNoResult);
-                return (
-                  <tr
-                    key={t.name}
-                    className={(selected === t.name ? "sel " : "") + st}
-                    onClick={() => setSelected(t.name)}
-                  >
-                    <td><StatusBadge s={st} /></td>
-                    <td className="ts" title={t.name}>{fmtTime(t.ts, t.mtime)}</td>
-                    <td className="branch" title={t.branch ?? ""}>{t.branch ?? (t.name.split("-").slice(2, -1).join("-") || "—")}</td>
-                    <td className="sha">{(t.sha ?? "").slice(0, 8) || "—"}</td>
-                    <td className="num">{t.gmPV != null ? t.gmPV.toFixed(3) : "—"}</td>
-                    <td className="num">{t.gmCps != null ? fmtNum(t.gmCps) : "—"}</td>
-                    <td className="num">{t.hasResult ? `${t.matchN ?? 0}/${t.rowN ?? 0}` : "—"}</td>
-                    <td className="num">{fmtDur(t.totalSeconds ?? null)}</td>
-                    <td className="irflag">{t.files.length > 0 ? <button className="mini" onClick={(e) => { e.stopPropagation(); onOpenGraph(t.name); }}>图谱</button> : <span className="dim">—</span>}</td>
-                  </tr>
-                );
-              })}
-              {rows.length === 0 && (
-                <tr><td colSpan={9} className="dim" style={{ textAlign: "center", padding: 18 }}>没有匹配的任务</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        {rows.length > 80 && !showAll && (
-          <button className="more" onClick={() => setShowAll(true)}>显示全部 {rows.length} 条（当前前 80）</button>
-        )}
-      </div>
-
       {/* ============ 任务详情 ============ */}
       {selected && (
-        <div className="dashcard detail">
+        <div className="dashcard detail" ref={detailRef}>
           <div className="cardtitle">
             任务详情 · <code className="taskname">{selected}</code>
             {selStatus && <StatusBadge s={selStatus} />}
@@ -442,6 +389,76 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
           )}
         </div>
       )}
+
+      {/* ============ 历史列表 ============ */}
+      <div className="dashcard">
+        <div className="cardtitle">
+          测试历史（{rows.length} 个任务，10s 自动刷新）
+          <span className="filters">
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="all">全部状态</option>
+              <option value="pass">PASS</option>
+              <option value="partial">PARTIAL</option>
+              <option value="fail">FAIL</option>
+              <option value="timeout">TIMEOUT</option>
+              <option value="running">运行中</option>
+              <option value="interrupted">已中断</option>
+            </select>
+            <input
+              className="branchq"
+              placeholder="按分支 / SHA / 目录过滤…"
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+            />
+          </span>
+        </div>
+        <div className="tablewrap">
+          <table className="tasktable">
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>时间</th>
+                <th>分支</th>
+                <th>SHA</th>
+                <th className="num">P/V 几何均值</th>
+                <th className="num">cycle/s 几何均值</th>
+                <th className="num">MATCH</th>
+                <th className="num">总时长</th>
+                <th>IR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((t) => {
+                const st = displayStatus(t, health, newestNoResult);
+                return (
+                  <tr
+                    key={t.name}
+                    className={(selected === t.name ? "sel " : "") + st}
+                    onClick={() => setSelected(t.name)}
+                  >
+                    <td><StatusBadge s={st} /></td>
+                    <td className="ts" title={t.name}>{fmtTime(t.ts, t.mtime)}</td>
+                    <td className="branch" title={t.branch ?? ""}>{t.branch ?? (t.name.split("-").slice(2, -1).join("-") || "—")}</td>
+                    <td className="sha">{(t.sha ?? "").slice(0, 8) || "—"}</td>
+                    <td className="num">{t.gmPV != null ? t.gmPV.toFixed(3) : "—"}</td>
+                    <td className="num">{t.gmCps != null ? fmtNum(t.gmCps) : "—"}</td>
+                    <td className="num">{t.hasResult ? `${t.matchN ?? 0}/${t.rowN ?? 0}` : "—"}</td>
+                    <td className="num">{fmtDur(t.totalSeconds ?? null)}</td>
+                    <td className="irflag">{t.files.length > 0 ? <button className="mini" onClick={(e) => { e.stopPropagation(); onOpenGraph(t.name); }}>图谱</button> : <span className="dim">—</span>}</td>
+                  </tr>
+                );
+              })}
+              {rows.length === 0 && (
+                <tr><td colSpan={9} className="dim" style={{ textAlign: "center", padding: 18 }}>没有匹配的任务</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {rows.length > 80 && !showAll && (
+          <button className="more" onClick={() => setShowAll(true)}>显示全部 {rows.length} 条（当前前 80）</button>
+        )}
+      </div>
+
     </div>
   );
 }

@@ -16,7 +16,7 @@ pyCircuit 的**测试监控台 + IR 可视化**统一前端。前身 pyCircuit-g
   （机器人 SQLite 状态库，只读 SELECT）提供，容器部署下自动降级为仅计数。
 - **历史列表**：全部 `task-*` 目录（含 result.json 摘要：状态 / 分支 / SHA /
   P/V 与 cycle/s 几何均值 / MATCH 数 / 耗时），状态与分支过滤，10s 自动刷新。
-- **任务详情**：逐 trace 双后端对比表（cycle/s / Verilator cycle/s / P/V / MATCH）、
+- **任务详情**（位于顶部状态卡与历史表之间，选中即滚入视野；首屏自动选中运行中任务）：逐 trace 双后端对比表（cycle/s / Verilator cycle/s / P/V / MATCH）、
   同分支 P/V 与 cycle/s 走势图（内联 SVG，可点击跳转）、execution.log 分页查看（带行号整页翻页，无内部滚动条；默认末页，运行中任务 5s 跟随最新页）、
   一键「在 IR 图谱中查看」该任务的 pass dump 时间线。
 
