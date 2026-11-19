@@ -265,3 +265,8 @@ button.more { margin-top: 8px; align-self: center; }
 .histchips .chip.st-interrupted { color: #9fb0c4; border-color: #232c3b; }
 .histpager { justify-content: center; padding-top: 8px; }
 .dashcard .cardtitle .filters { margin-left: auto; }
+
+/* 排队中的合成行（尚无 task 目录）：弱化、不可点 */
+.tasktable tr.isqueued { cursor: default; }
+.tasktable tr.isqueued td.branch { color: #cbb287; }
+.badge.st-queued { color: #ffcc80; background: #241a08; border: 1px solid #5c4514; }

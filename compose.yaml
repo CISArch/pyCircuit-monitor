@@ -9,9 +9,12 @@ services:
     volumes:
       # Host logs -> container log root read-only; LOG_ROOT points here by default.
       - ../auto_perf_logs:/data/auto_perf_logs:ro
+      # Bot state DB (pending/running queue) read-only, for the queue rows.
+      - ${AUTO_PERF_STATE_DIR:-/home/lidongzhe/.local/state/auto-perf}:/data/auto-perf-state:ro
     environment:
       # auto_perf bot (port 8790 on the host) for live queue/health proxy.
       AUTO_PERF_API_BASE: http://host.docker.internal:8790
+      AUTO_PERF_STATE_DB: /data/auto-perf-state/state.sqlite3
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # Resource guardrails: this service is a tiny static+API server; hard caps

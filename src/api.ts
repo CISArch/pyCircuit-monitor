@@ -23,6 +23,8 @@ export interface TaskSummary {
   areaTop?: string | null;
   logSize?: number;
   logMtime?: number | null;
+  /** 合成行：仍在机器人队列里、尚无 task 目录 */
+  queued?: boolean;
 }
 
 export interface ResultRow {
@@ -126,7 +128,7 @@ export const fetchLogPage = (task: string, path: string, page: number | "last", 
   );
 
 /** 展示状态：无 result.json 的目录，若机器人在跑且这是最新目录则视为 running，否则 interrupted。 */
-export type DisplayStatus = "pass" | "partial" | "fail" | "timeout" | "running" | "interrupted";
+export type DisplayStatus = "pass" | "partial" | "fail" | "timeout" | "running" | "interrupted" | "queued";
 
 export function displayStatus(t: TaskSummary, health: Health | null, newestNoResult: string | null): DisplayStatus {
   if (t.hasResult && t.status) return t.status as DisplayStatus;

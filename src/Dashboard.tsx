@@ -12,6 +12,7 @@ const STATUS_META: Record<DisplayStatus, { label: string; cls: string }> = {
   timeout: { label: "TIMEOUT", cls: "st-timeout" },
   running: { label: "运行中", cls: "st-running" },
   interrupted: { label: "已中断", cls: "st-interrupted" },
+  queued: { label: "排队", cls: "st-queued" },
 };
 
 function StatusBadge({ s }: { s: DisplayStatus }) {
@@ -181,11 +182,30 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
   }, [selected, selRunning, loadLogPage]);
 
   // ---- derived table ----
+  // 排队中（尚未产生 task 目录）的任务并进表格：按入队时间倒序 → 最后入队的排第一行
+  const tableRows = useMemo(() => {
+    const queued: TaskSummary[] = (queue?.available ? queue.rows ?? [] : [])
+      .filter((r) => r.status === "pending")
+      .map((r) => ({
+        name: "queue:" + r.delivery_id,
+        mtime: Date.parse(r.created_at) || 0,
+        ts: null,
+        files: [],
+        hasResult: false,
+        branch: r.branch,
+        sha: r.sha,
+        queued: true,
+      }));
+    const started = tasks.map((t) => ({ ...t, queued: false }));
+    const tms = (t: TaskSummary) => (t.ts ? Date.parse(t.ts) : t.mtime) || 0;
+    return [...queued, ...started].sort((a, b) => tms(b) - tms(a));
+  }, [tasks, queue]);
+
   const rows = useMemo(() => {
     const q = branchFilter.trim().toLowerCase();
-    return tasks
+    return tableRows
       .filter((t) => {
-        const st = displayStatus(t, health, newestNoResult);
+        const st = t.queued ? "queued" : displayStatus(t, health, newestNoResult);
         if (statusFilter !== "all" && st !== statusFilter) return false;
         if (q) {
           const hay = ((t.branch ?? "") + " " + t.name + " " + (t.sha ?? "")).toLowerCase();
@@ -193,7 +213,7 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
         }
         return true;
       });
-  }, [tasks, health, statusFilter, branchFilter, newestNoResult]);
+  }, [tableRows, health, statusFilter, branchFilter, newestNoResult]);
 
   const histPages = Math.max(1, Math.ceil(rows.length / histPageSize));
   const histPageSafe = Math.min(Math.max(histPage, 1), histPages);
@@ -249,6 +269,7 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
               <option value="fail">FAIL</option>
               <option value="timeout">TIMEOUT</option>
               <option value="running">运行中</option>
+              <option value="queued">排队中</option>
               <option value="interrupted">已中断</option>
             </select>
             <input
@@ -286,12 +307,13 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
             </thead>
             <tbody>
               {pageRows.map((t) => {
-                const st = displayStatus(t, health, newestNoResult);
+                const st = t.queued ? "queued" : displayStatus(t, health, newestNoResult);
                 return (
                   <tr
                     key={t.name}
-                    className={(selected === t.name ? "sel " : "") + st}
-                    onClick={() => setSelected(t.name)}
+                    className={(selected === t.name ? "sel " : "") + st + (t.queued ? " isqueued" : "")}
+                    title={t.queued ? "已入队，等待前面的任务跑完（尚无日志目录）" : undefined}
+                    onClick={() => { if (!t.queued) setSelected(t.name); }}
                   >
                     <td><StatusBadge s={st} /></td>
                     <td className="ts" title={t.name}>{fmtTime(t.ts, t.mtime)}</td>
@@ -444,24 +466,6 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
         </div>
       )}
 
-      {/* ============ 排队明细（仅当宿主机 dev 模式可读状态库时显示） ============ */}
-      {queue?.available && (queue.rows ?? []).length > 0 && (
-        <div className="dashcard">
-          <div className="cardtitle">排队明细<span className="histcount">{(queue.rows ?? []).length} 条</span></div>
-          <div className="queuelist">
-            {(queue.rows ?? []).map((r) => (
-              <div key={r.delivery_id} className="qrow">
-                {r.status === "running"
-                  ? <StatusBadge s="running" />
-                  : <span className="badge st-interrupted">排队</span>}
-                <span className="runbranch">{r.branch}</span>
-                <span className="dim">{(r.sha ?? "").slice(0, 8)}</span>
-                <span className="dim">{r.status === "running" ? relTime(r.started_at) : "等了 " + relTime(r.created_at)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
     </div>
   );

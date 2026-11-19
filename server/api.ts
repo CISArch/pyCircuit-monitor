@@ -227,26 +227,66 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
     return p
   }
 
-  async function computeQueue(): Promise<any> {
-    try {
-      const dbStat = await stat(stateDb).catch(() => null)
-      if (!dbStat?.isFile()) return { available: false }
-      const { DatabaseSync } = await import('node:sqlite')
-      const db = new DatabaseSync(stateDb, { timeout: 1500 } as any)
+  // The bot's state DB is a WAL database on a read-only mount: opening it
+  // in place succeeds but the first prepare() fails (SQLite wants to create
+  // -shm). Copy db + sidecars to a writable temp dir (≈15ms for 23MB) and
+  // read the copy; cached briefly because the queue barely changes.
+  const QUEUE_TTL_MS = 3000
+  let queueCache: { at: number; body: any } | null = null
+  let queueInflight: Promise<any> | null = null
+
+  async function readQueueRows(): Promise<any> {
+    const { DatabaseSync } = await import('node:sqlite')
+    const { mkdir, copyFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const dir = join(tmpdir(), 'pycircuit-monitor-state')
+    await mkdir(dir, { recursive: true })
+    const copy = join(dir, 'state.sqlite3')
+    await copyFile(stateDb, copy)
+    for (const suffix of ['-wal', '-shm']) {
       try {
-        const rows = db
-          .prepare(
-            `SELECT delivery_id, branch, sha, status, created_at, started_at
-             FROM tasks WHERE status IN ('pending','running') ORDER BY id`,
-          )
-          .all()
-        return { available: true, rows }
-      } finally {
-        db.close()
+        await copyFile(stateDb + suffix, copy + suffix)
+      } catch {
+        await rm(copy + suffix, { force: true })
       }
-    } catch (e: any) {
-      return { available: false, error: String(e?.message ?? e) }
     }
+    const db = new DatabaseSync(copy, { timeout: 2000 } as any)
+    try {
+      return db
+        .prepare(
+          `SELECT delivery_id, branch, sha, status, created_at, started_at
+           FROM tasks WHERE status IN ('pending','running') ORDER BY id`,
+        )
+        .all()
+    } finally {
+      db.close()
+    }
+  }
+
+  async function computeQueue(): Promise<any> {
+    const file = await stat(stateDb).catch(() => null)
+    if (!file?.isFile()) return { available: false, stateDb }
+    try {
+      return { available: true, rows: await readQueueRows() }
+    } catch (e: any) {
+      // transient inconsistency between db and -wal copies: retry once
+      try {
+        await new Promise((r) => setTimeout(r, 120))
+        return { available: true, rows: await readQueueRows() }
+      } catch (e2: any) {
+        return { available: false, stateDb, error: String(e2?.message ?? e2) }
+      }
+    }
+  }
+
+  function getQueue(): Promise<any> {
+    const now = Date.now()
+    if (queueCache && now - queueCache.at < QUEUE_TTL_MS) return Promise.resolve(queueCache.body)
+    if (queueInflight) return queueInflight
+    queueInflight = computeQueue()
+      .then((body) => { queueCache = { at: Date.now(), body }; return body })
+      .finally(() => { queueInflight = null })
+    return queueInflight
   }
 
   return function autoPerfHandler(req: any, res: any, next: Next): void {
@@ -264,7 +304,7 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
     }
 
     if (url.pathname === '/api/autoperf/queue') {
-      void computeQueue().then((body) => json(res, 200, body))
+      void getQueue().then((body) => json(res, 200, body))
       return
     }
 
