@@ -1,14 +1,19 @@
 services:
-  pycircuit-graph:
+  pycircuit-monitor:
     build: .
-    image: pycircuit-graph:latest
-    container_name: pycircuit-graph
+    image: pycircuit-monitor:latest
+    container_name: pycircuit-monitor
     restart: unless-stopped
     ports:
       - "4173:4173"
     volumes:
       # Host logs -> container log root read-only; LOG_ROOT points here by default.
       - ../auto_perf_logs:/data/auto_perf_logs:ro
+    environment:
+      # auto_perf bot (port 8790 on the host) for live queue/health proxy.
+      AUTO_PERF_API_BASE: http://host.docker.internal:8790
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Resource guardrails: this service is a tiny static+API server; hard caps
     # keep it from ever interfering with build/test workloads on this host.
     deploy:

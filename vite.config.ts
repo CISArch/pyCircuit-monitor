@@ -1,151 +1,23 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
-import { readFile, open } from 'node:fs/promises'
-import { createReadStream, readdirSync, statSync } from 'node:fs'
-import { join, resolve, sep } from 'node:path'
+import { autoPerfApi } from './server/api.ts'
 
-const LOG_ROOT = process.env.AUTO_PERF_LOG_DIR || '/tmp/auto_perf_logs'
-
-function findMlirFiles(dir: string, base: string, out: string[], depth = 0): void {
-  if (depth > 4) return
-  for (const name of readdirSyncSafe(dir)) {
-    const full = join(dir, name)
-    const rel = join(base, name)
-    const st = statSyncSafe(full)
-    if (!st) continue
-    if (st.isDirectory()) findMlirFiles(full, rel, out, depth + 1)
-    else if (name.endsWith('.mlir')) out.push(rel.split(sep).join('/'))
-  }
-}
-
-function readdirSyncSafe(dir: string): string[] {
-  try { return readdirSync(dir) } catch { return [] }
-}
-
-function statSyncSafe(p: string) {
-  try { return statSync(p) } catch { return null }
-}
-
-type Middleware = (req: any, res: any, next: () => void) => void
-
-// REST-ish API over the auto_perf log root so the browser can browse tasks
-// and fetch dumped pass IR files. Paths are validated to stay under LOG_ROOT.
-// Shared by dev server and production preview so both serve the task panel.
-function autoPerfMiddleware(req: any, res: any, next: () => void): void {
-  const url = new URL(req.url ?? '/', 'http://localhost')
-  if (!url.pathname.startsWith('/api/autoperf/')) return next()
-
-  const json = (code: number, body: unknown) => {
-    res.statusCode = code
-    res.setHeader('Content-Type', 'application/json; charset=utf-8')
-    res.end(JSON.stringify(body))
-  }
-
-  if (url.pathname === '/api/autoperf/tasks') {
-    let entries: string[] = []
-    try { entries = readdirSyncSafe(LOG_ROOT) } catch { /* root missing */ }
-    const tasks = []
-    for (const name of entries.filter((e) => e.startsWith('task-')).sort().reverse()) {
-      const dir = join(LOG_ROOT, name)
-      const st = statSyncSafe(dir)
-      if (!st?.isDirectory()) continue
-      const files: string[] = []
-      findMlirFiles(dir, '', files)
-      const s = statSyncSafe(join(dir, 'result.json'))
-      tasks.push({
-        name,
-        mtime: st.mtimeMs,
-        hasResult: !!s,
-        files,
-      })
-    }
-    return json(200, { root: LOG_ROOT, tasks })
-  }
-
-  if (url.pathname === '/api/autoperf/count') {
-    // pre-fetch estimate: SSA-def count + largest single function, streamed
-    // server-side so the client can skip oversized dumps without downloading
-    const task = url.searchParams.get('task') ?? ''
-    const file = url.searchParams.get('path') ?? ''
-    const base = resolve(LOG_ROOT, task)
-    const full = resolve(base, file)
-    if (!full.startsWith(resolve(LOG_ROOT) + sep) || !full.startsWith(base + sep)) {
-      return json(403, { error: 'path escapes log root' })
-    }
-    if (!full.endsWith('.mlir')) return json(400, { error: 'only .mlir files' })
-    void (async () => {
-      try {
-        const st = statSync(full)
-        let ops = 0, cur = 0, maxOps = 0, maxFunc: string | null = null, curFunc: string | null = null, rem = '', combDepth = 0
-        const braces = (line: string) => (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length
-        const onLine = (line: string) => {
-          if (combDepth > 0) { combDepth += braces(line); return } // comb region: whole comb = 1 node (rendered collapsed)
-          const f = /func\.func\s+@([\w.$-]+)/.exec(line)
-          if (f) {
-            if (curFunc && cur > maxOps) { maxOps = cur; maxFunc = curFunc }
-            curFunc = f[1]; cur = 0
-          } else if (/^\s*%[\w.$-]+(:\d+)?\s*=\s*pyc\.comb\b/.test(line)) {
-            cur++; ops++; combDepth = braces(line)
-          } else if (/^\s*%[\w.$-]+(:\d+)?\s*=/.test(line) && !/^\s*%[\w.$-]+(:\d+)?\s*=\s*pyc\.(wire|alias)\b/.test(line)) { cur++; ops++ }
-        }
-        for await (const chunk of createReadStream(full, 'utf8')) {
-          const lines = (rem + chunk).split('\n')
-          rem = lines.pop() ?? ''
-          for (const line of lines) onLine(line)
-        }
-        if (rem) onLine(rem)
-        if (curFunc && cur > maxOps) { maxOps = cur; maxFunc = curFunc }
-        json(200, { bytes: st.size, ops, maxOps, maxFunc })
-      } catch (e) {
-        json(404, { error: String(e) })
-      }
-    })()
-    return
-  }
-
-  if (url.pathname === '/api/autoperf/file' || url.pathname === '/api/autoperf/head') {
-    const task = url.searchParams.get('task') ?? ''
-    const file = url.searchParams.get('path') ?? ''
-    const base = resolve(LOG_ROOT, task)
-    const full = resolve(base, file)
-    if (!full.startsWith(resolve(LOG_ROOT) + sep) || !full.startsWith(base + sep)) {
-      return json(403, { error: 'path escapes log root' })
-    }
-    if (!full.endsWith('.mlir')) return json(400, { error: 'only .mlir files' })
-    if (url.pathname === '/api/autoperf/head') {
-      // read only the first N bytes (module-name detection needs just the head)
-      const n = Math.min(Math.max(Number(url.searchParams.get('n')) || 1200, 1), 4096)
-      open(full, 'r').then(async (fh) => {
-        try {
-          const buf = Buffer.alloc(n)
-          const { bytesRead } = await fh.read(buf, 0, n, 0)
-          json(200, { path: file, text: buf.subarray(0, bytesRead).toString('utf-8') })
-        } finally { await fh.close() }
-      }).catch((e) => json(404, { error: String(e) }))
-      return
-    }
-    readFile(full, 'utf-8')
-      .then((text) => json(200, { path: file, text }))
-      .catch((e) => json(404, { error: String(e) }))
-    return
-  }
-
-  next()
-}
-
-function autoPerfApi(): Plugin {
+// auto_perf log/task API (task summaries, result details, live health, IR
+// file access). Shared with the production server in docker/serve.mjs.
+function autoPerfApiPlugin(): Plugin {
+  const middleware = autoPerfApi()
   return {
     name: 'auto-perf-api',
     configureServer(server) {
-      server.middlewares.use(autoPerfMiddleware as Middleware)
+      server.middlewares.use(middleware)
     },
     configurePreviewServer(server) {
-      server.middlewares.use(autoPerfMiddleware as Middleware)
+      server.middlewares.use(middleware)
     },
   }
 }
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), autoPerfApi()],
+  plugins: [react(), autoPerfApiPlugin()],
 })

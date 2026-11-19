@@ -134,3 +134,115 @@ body { font-family: system-ui, sans-serif; background: #11151c; color: #dbe2ea; 
 .sidebar pre { background: #10151d; padding: 8px; border-radius: 6px; overflow-x: auto; }
 .sidebar ul { margin: 0; padding-left: 18px; }
 .hint { color: #6d7f95; }
+
+/* ===================== pyCircuit Monitor 壳 + 监控台 ===================== */
+.appshell { height: 100%; display: flex; flex-direction: column; background: #0b0f16; }
+.topnav {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 14px; background: #121822; border-bottom: 1px solid #232c3b;
+}
+.topnav .brand { color: #4dd0e1; margin-right: 10px; font-size: 14px; letter-spacing: 0.5px; }
+.topnav button {
+  background: #1c2330; color: #9fb0c4; border: 1px solid #232c3b;
+  border-radius: 6px; padding: 4px 14px; font-size: 13px; cursor: pointer;
+}
+.topnav button:hover { color: #dbe2ea; }
+.topnav button.on { background: #23405e; border-color: #4dd0e1; color: #4dd0e1; }
+.topnav .topnote { margin-left: auto; color: #55677e; font-size: 12px; }
+.viewbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.viewbody > .app { flex: 1; min-height: 0; }
+
+.dashboard { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+.dashcards { display: flex; gap: 14px; flex-wrap: wrap; }
+.dashcard {
+  background: #10151d; border: 1px solid #232c3b; border-radius: 10px;
+  padding: 10px 14px; min-width: 300px; flex: 1;
+}
+.dashcard.grow { flex: 2; }
+.dashcard.detail { flex: 1 1 auto; }
+.cardtitle { display: flex; align-items: center; gap: 10px; font-size: 13px; color: #cfd9e4; margin-bottom: 8px; }
+.cardtitle .spacer { flex: 1; }
+.dim { color: #6d7f95; font-size: 12px; }
+.botdot { font-size: 12px; border-radius: 999px; padding: 2px 10px; border: 1px solid; }
+.botdot.up { color: #81c784; border-color: #2e5233; background: #12210f; }
+.botdot.down { color: #e57373; border-color: #5c2b2b; background: #241010; }
+
+.countrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.countrow .chip { opacity: 1; cursor: default; font-size: 12px; padding: 3px 10px; }
+.countrow .chip.st-pass { color: #81c784; border-color: #2e5233; }
+.countrow .chip.st-partial { color: #ffb74d; border-color: #5c4514; }
+.countrow .chip.st-fail { color: #e57373; border-color: #5c2b2b; }
+.countrow .chip.st-timeout { color: #ba68c8; border-color: #4a2a52; }
+.countrow .chip.st-running { color: #4dd0e1; border-color: #1c4a55; }
+.countrow .chip.st-interrupted { color: #9fb0c4; border-color: #232c3b; }
+
+.badge { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; border-radius: 4px; padding: 2px 7px; }
+.badge.st-pass { color: #81c784; background: #12210f; border: 1px solid #2e5233; }
+.badge.st-partial { color: #ffb74d; background: #241a08; border: 1px solid #5c4514; }
+.badge.st-fail { color: #e57373; background: #241010; border: 1px solid #5c2b2b; }
+.badge.st-timeout { color: #ba68c8; background: #1c0f20; border: 1px solid #4a2a52; }
+.badge.st-running { color: #4dd0e1; background: #0b1c22; border: 1px solid #1c4a55; animation: pulse 1.6s ease-in-out infinite; }
+.badge.st-interrupted { color: #8fa0b5; background: #171d27; border: 1px solid #232c3b; }
+@keyframes pulse { 50% { opacity: 0.55; } }
+
+.runline { display: flex; align-items: center; gap: 10px; padding: 4px 0; cursor: pointer; }
+.runline:hover { background: #141b26; }
+.runbranch { color: #dbe2ea; font-weight: 600; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queuelist { margin-top: 6px; border-top: 1px dashed #232c3b; }
+.qrow { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+
+.filters { margin-left: auto; display: flex; gap: 6px; }
+.filters select, .filters input {
+  background: #0d1117; color: #c9d6e3; border: 1px solid #232c3b; border-radius: 6px; padding: 3px 8px; font-size: 12px;
+}
+.branchq { width: 240px; }
+
+.tablewrap { overflow: auto; max-height: 480px; border: 1px solid #1a2230; border-radius: 8px; }
+.tasktable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.tasktable th {
+  position: sticky; top: 0; background: #121822; color: #8fa0b5; font-weight: 600;
+  text-align: left; padding: 6px 10px; border-bottom: 1px solid #232c3b; white-space: nowrap;
+}
+.tasktable td { padding: 5px 10px; border-bottom: 1px solid #171e29; color: #c9d6e3; white-space: nowrap; }
+.tasktable tbody tr { cursor: pointer; }
+.tasktable tbody tr:hover { background: #141b26; }
+.tasktable tbody tr.sel { background: #18293d; outline: 1px solid #2c4a66; }
+.tasktable td.num, .tasktable th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tasktable td.ts { color: #8fa0b5; }
+.tasktable td.branch { max-width: 300px; overflow: hidden; text-overflow: ellipsis; color: #9fd8e8; }
+.tasktable td.sha { color: #7d8fa5; font-family: ui-monospace, Consolas, monospace; }
+.tasktable tr.fail td { background: rgba(229, 115, 115, 0.04); }
+.tasktable tr.partial td { background: rgba(255, 183, 77, 0.04); }
+.tasktable.trace td:first-child { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+button.mini {
+  background: #1c2330; color: #9fb0c4; border: 1px solid #232c3b; border-radius: 6px;
+  padding: 2px 10px; font-size: 12px; cursor: pointer;
+}
+button.mini:hover { color: #4dd0e1; border-color: #1c4a55; }
+button.more { margin-top: 8px; align-self: center; }
+
+.detailbody { display: flex; flex-direction: column; gap: 12px; }
+.detailbody .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 12.5px; color: #9fb0c4; }
+.detailbody .meta b { color: #dbe2ea; }
+.detailbody .meta a { color: #4dd0e1; text-decoration: none; }
+.taskname { color: #9fd8e8; font-size: 11.5px; }
+.errline { color: #e57373; font-size: 12.5px; background: #241010; border: 1px solid #5c2b2b; border-radius: 6px; padding: 6px 10px; }
+
+.trends { display: flex; gap: 14px; flex-wrap: wrap; }
+.spark { flex: 1; min-width: 320px; background: #0d1117; border: 1px solid #1a2230; border-radius: 8px; padding: 8px 10px; }
+.sparkhead { display: flex; justify-content: space-between; font-size: 12px; color: #8fa0b5; margin-bottom: 4px; }
+.sparkrange b { color: #4dd0e1; }
+.sparksvg { width: 100%; height: 96px; display: block; }
+.sparkdot { fill: #81c784; cursor: pointer; }
+.sparkdot.bad { fill: #e57373; }
+.sparkdot:hover, .sparkdot.sel { stroke: #fff; stroke-width: 1.5; }
+.spark.empty { color: #55677e; font-size: 12px; }
+
+.logwrap { display: flex; flex-direction: column; gap: 4px; }
+.loghead { font-size: 12px; color: #8fa0b5; display: flex; justify-content: space-between; }
+.logbox {
+  margin: 0; background: #05070b; border: 1px solid #1a2230; border-radius: 8px;
+  padding: 8px 10px; max-height: 300px; overflow: auto;
+  font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; line-height: 1.45;
+  color: #a8b7c7; white-space: pre-wrap; word-break: break-all;
+}

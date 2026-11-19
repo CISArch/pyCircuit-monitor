@@ -1,16 +1,42 @@
-# pyCircuit-graph
+# pyCircuit-monitor
 
-基于 [AntV G6](https://g6.antv.antgroup.com/) 的 pyCircuit IR（pyc MLIR 方言）节点可视化工具。
+pyCircuit 的**测试监控台 + IR 可视化**统一前端。前身 pyCircuit-graph（仓库已更名，
+旧 URL 自动重定向），IR 图谱保留为其中一个功能页，新增 auto_perf 实时监控台首页。
 
-pyCircuit 编译器产出的 pyc 方言 .mlir 文件（供 DavinciBaseLine 使用）是 SSA 形式的硬件 IR。
-本仓库提供两部分：
+两大功能页（顶部导航切换，URL `?view=` 持久化）：
 
-1. **scripts/export_ir.py** — 把 .mlir 解析为 graph.json（纯 Python 正则 SSA 解析，无需 MLIR 绑定）
-2. **Web 界面** — Vite + React + AntV G6，按函数渲染 use-def 图
+1. **监控台（默认首页）** — auto_perf 测试机器人（DavinciBaseLine，HTTP :8790）的实时状态、历史与结果
+2. **IR 图谱** — 原有 pyc MLIR use-def 图可视化（pass 时间线 / diff）
 
-## 使用
+## 监控台（Dashboard）
 
-### 本地开发
+- **实时状态**：机器人在线状态与队列计数（`/api/autoperf/health` 代理，5s 轮询）；
+  正在运行的任务实时高亮，execution.log 5s 轮询尾部跟踪自动滚动；
+  排队/运行明细（分支名 + SHA + 等待时长）在宿主机 dev 模式下经 `AUTO_PERF_STATE_DB`
+  （机器人 SQLite 状态库，只读 SELECT）提供，容器部署下自动降级为仅计数。
+- **历史列表**：全部 `task-*` 目录（含 result.json 摘要：状态 / 分支 / SHA /
+  P/V 与 cycle/s 几何均值 / MATCH 数 / 耗时），状态与分支过滤，10s 自动刷新。
+- **任务详情**：逐 trace 双后端对比表（cycle/s / Verilator cycle/s / P/V / MATCH）、
+  同分支 P/V 与 cycle/s 走势图（内联 SVG，可点击跳转）、execution.log 查看、
+  一键「在 IR 图谱中查看」该任务的 pass dump 时间线。
+
+### API（dev 与容器共用 `server/api.ts`，零 npm 依赖）
+
+- `GET /api/autoperf/tasks` — 任务列表 + result.json 摘要（gmCps/gmPV/MATCH/耗时，3s 缓存）
+- `GET /api/autoperf/task?name=<dir>` — 完整 result.json + execution.log 尾部 + 文件清单
+- `GET /api/autoperf/log?task=<dir>&path=<rel>` — 原文日志（.log/.txt/.json/.csv，8MB 上限）
+- `GET /api/autoperf/health` — 代理机器人 `/api/health`（`AUTO_PERF_API_BASE`，默认 `127.0.0.1:8790`）
+- `GET /api/autoperf/queue` — 机器人 SQLite 状态库的 pending/running 明细（可选，容器内不可用时返回 `available:false`）
+- `GET /api/autoperf/file|head|count?task=<name>&path=<rel>` — .mlir 读取（大文件流式，见 IR 图谱一节）
+- 均有路径校验，禁止越出日志根目录。
+
+## 本地开发
+
+```bash
+# 监控台指向工作区日志目录（容器里等价挂载为 /data/auto_perf_logs）
+AUTO_PERF_LOG_DIR=/path/to/auto_perf_logs npm run dev
+# dev 模式默认读取 ~/.local/state/auto-perf/state.sqlite3 提供 queue 明细（可选）
+```
 
 ```bash
 # 1a. 导出普通 IR（单文件或整个目录）
@@ -26,32 +52,35 @@ cp graph.json public/graph.json   # 若内容有更新
 npm install && npm run dev
 ```
 
-### Docker 部署
+## Docker 部署
 
 ```bash
 docker compose up -d --build
 # 服务监听 http://localhost:4173
 ```
 
-- 镜像两阶段构建：build 阶段产出 dist；serve 阶段用 `docker/serve.mjs`
-  （零依赖纯 Node 静态 + API 服务器，无 node_modules，常驻内存 ~25MB）。
+- 镜像两阶段构建：build 阶段产出 dist；serve 阶段用 `docker/serve.mjs` + `server/api.ts`
+  （零依赖纯 Node 静态 + API 服务器，无 node_modules，Node 24 原生执行 .ts）。
 - `compose.yaml` 把日志目录只读挂载为 `/data/auto_perf_logs`
-  （改挂载路径即可接自己的日志），资源限制 1 CPU / 128M，带 healthcheck 与日志轮转。
+  （改挂载路径即可接自己的日志），并通过 `extra_hosts: host.docker.internal`
+  代理宿主机 8790 的机器人 health；资源限制 1 CPU / 128M，带 healthcheck 与日志轮转。
 
-## auto_perf 任务监控
+## IR 图谱
 
-dev/serve 均内置 API（vite.config.ts 的 autoPerfApi 插件 / docker/serve.mjs），监控
-`AUTO_PERF_LOG_DIR`（默认 `/tmp/auto_perf_logs`，容器内 `/data/auto_perf_logs`）下的 `task-*` 目录：
+pyCircuit 编译器产出的 pyc 方言 .mlir 文件（供 DavinciBaseLine 使用）是 SSA 形式的硬件 IR。
+基于 [AntV G6](https://g6.antv.antgroup.com/) 按函数渲染 use-def 图：
 
-- UI 顶栏第二行每 15s 轮询任务列表；选中任务后自动把该任务目录下所有 `.mlir`
-  （主要来自 `pass_ir/`）作为 pass 时间线载入，左侧按 pass 执行层级展示文件树，
-  ◀▶/diff 跨 IR 对比。
-- API：
-  - `GET /api/autoperf/tasks` — 任务列表与文件清单（短 TTL 缓存）
-  - `GET /api/autoperf/file?task=<name>&path=<rel>` — 读整个 .mlir
-  - `GET /api/autoperf/head?task=<name>&path=<rel>&n=<bytes>` — 只读文件前 N 字节（模块名检测用）
-  - `GET /api/autoperf/count?task=<name>&path=<rel>` — 服务端流式统计节点估算 `{bytes, ops, maxOps, maxFunc}`；口径对齐渲染图：pyc.comb region 折叠记 1 节点、wire/alias 透明节点不计；前端拉取前预检，最大函数超渲染上限即跳过下载
-  - 均有路径校验，禁止越出日志根目录。
+1. **scripts/export_ir.py** — 把 .mlir 解析为 graph.json（纯 Python 正则 SSA 解析，无需 MLIR 绑定）
+2. **Web 界面** — Vite + React + AntV G6
+
+### auto_perf 任务联动
+
+### auto_perf 任务联动
+
+IR 图谱页顶栏任务栏每 15s 轮询任务列表（`AUTO_PERF_LOG_DIR`，默认 `/tmp/auto_perf_logs`，
+容器内 `/data/auto_perf_logs`）；选中任务后自动把该任务目录下所有 `.mlir`
+（主要来自 `pass_ir/`）作为 pass 时间线载入，左侧按 pass 执行层级展示文件树，
+◀▶/diff 跨 IR 对比。监控台任务详情的「在 IR 图谱中查看」按钮同样跳转到这里。
 
 ## 跨 pass 查看
 
