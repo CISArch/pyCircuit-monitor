@@ -43,6 +43,8 @@ Local API 入队；成功后提示 `已入队：<分支> @<sha8>（task <id>）`
 - `GET /api/autoperf/health` — 代理机器人 `/api/health`（`AUTO_PERF_API_BASE`，默认 `127.0.0.1:8790`）
 - `GET /api/autoperf/queue` — 机器人 SQLite 状态库的 pending/running 明细（可选，容器内不可用时返回 `available:false`）
 - `GET /api/autoperf/file|head|count?task=<name>&path=<rel>` — .mlir 读取（大文件流式，见 IR 图谱一节）
+- `GET /api/autoperf/taskfiles?task=<name>` — 单任务的 pass dump 清单（IR 页按需取，列表接口只给 `fileCount`）
+- **省流量**：轮询接口（tasks/task/log/queue/best/refs/health）均带 `ETag`，配合 `If-None-Match` 在内容未变时返回 `304`（0 字节）；>2 KB 的 JSON 与静态 JS/CSS/HTML 按 `Accept-Encoding` 做 gzip；哈希文件名走 `immutable` 一年缓存；页面隐藏时前端暂停轮询。
 - `GET /api/autoperf/queue` — 排队/运行中明细（读机器人状态库；只读挂载下用临时副本读取，3s 缓存）
 - 均有路径校验，禁止越出日志根目录。
 
