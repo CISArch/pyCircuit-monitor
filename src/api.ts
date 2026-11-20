@@ -65,7 +65,7 @@ export interface TaskDetail {
   ts: string | null;
   result: TaskResult | null;
   summary: Record<string, unknown> | null;
-  logTail: string;
+
   logSize: number;
   logMtime: number | null;
   fileCount?: number;

@@ -91,25 +91,6 @@ function summarizeResult(result: any): Record<string, unknown> {
 }
 
 /** Read the last ~64KB of a file and return its final `maxLines` lines. */
-async function tailLines(path: string, maxBytes = 65536, maxLines = 200): Promise<string> {
-  try {
-    const fh = await openFile(path, 'r')
-    try {
-      const st = await fh.stat()
-      const len = Math.min(maxBytes, st.size)
-      const buf = Buffer.alloc(len)
-      const { bytesRead } = await fh.read(buf, 0, len, st.size - len)
-      const lines = buf.subarray(0, bytesRead).toString('utf-8').split('\n')
-      while (lines.length > maxLines) lines.shift()
-      return lines.join('\n')
-    } finally {
-      await fh.close()
-    }
-  } catch {
-    return ''
-  }
-}
-
 /** 读取请求体（兼容 vite connect 与原生 http 两种情况）。 */
 function readBody(req: any, limit = 1 << 20): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -568,13 +549,11 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
           /* not finished yet */
         }
         const lg = await stat(join(dir, 'execution.log')).catch(() => null)
-        const logTail = await tailLines(join(dir, 'execution.log'))
         json(res, 200, {
           name,
           ts: tsFromTaskName(name),
           result,
           summary: result ? summarizeResult(result) : null,
-          logTail,
           logSize: lg?.size ?? 0,
           logMtime: lg?.mtimeMs ?? null,
           fileCount: files.length,
