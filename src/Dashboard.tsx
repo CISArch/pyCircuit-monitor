@@ -100,6 +100,8 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [branches, setBranches] = useState<{ branch: string; sha: string }[]>([]);
+  const [sugOpen, setSugOpen] = useState(false);
+  const [sugIndex, setSugIndex] = useState(-1);
   const logStateRef = useRef<LogPage | null>(null);
   logStateRef.current = logPage;
   const logPageSizeRef = useRef(100);
@@ -151,6 +153,15 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
     autoPickedRef.current = true;
     setSelected(runningTask.name);
   }, [runningTask, selected]);
+
+  // 分支建议：子串匹配分支名或 SHA 前缀，最多 8 条
+  const suggestions = useMemo(() => {
+    const q = submitText.trim().toLowerCase();
+    const list = branches.filter(
+      (b) => !q || b.branch.toLowerCase().includes(q) || b.sha.toLowerCase().startsWith(q),
+    );
+    return list.slice(0, 8);
+  }, [branches, submitText]);
 
   // ---- 手动提测：转发机器人 Local API ----
   const doSubmit = useCallback(async () => {
@@ -373,27 +384,74 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
         </div>
         <div className="submitbar">
           <span className="dim">手动提测</span>
-          <span className="searchwrap">
-            <input
-              className="submitq"
-              list="branch-options"
-              placeholder="分支名，或 ≥7 位 commit SHA（回车提交）"
-              value={submitText}
-              onChange={(e) => { setSubmitText(e.target.value); setSubmitMsg(null); }}
-              onKeyDown={(e) => { if (e.key === "Enter") void doSubmit(); }}
-            />
-            {submitText && (
-              <button className="searchclear" title="清空" onClick={() => { setSubmitText(""); setSubmitMsg(null); }}>×</button>
+          <span className="submitwrap">
+            <span className="searchwrap">
+              <input
+                className="submitq"
+                placeholder="分支名，或 ≥7 位 commit SHA（回车提交）"
+                value={submitText}
+                onChange={(e) => {
+                  setSubmitText(e.target.value);
+                  setSubmitMsg(null);
+                  setSugOpen(true);
+                  setSugIndex(-1);
+                }}
+                onFocus={() => { setSugOpen(true); setSugIndex(-1); }}
+                onBlur={() => setTimeout(() => setSugOpen(false), 120)}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                    e.preventDefault();
+                    if (!sugOpen) { setSugOpen(true); return; }
+                    const n = suggestions.length;
+                    if (!n) return;
+                    setSugIndex((i) => {
+                      const next = e.key === "ArrowDown" ? i + 1 : i - 1;
+                      return next < 0 ? n - 1 : next >= n ? 0 : next;
+                    });
+                    return;
+                  }
+                  if (e.key === "Escape") { setSugOpen(false); setSugIndex(-1); return; }
+                  if (e.key === "Enter") {
+                    if (sugOpen && sugIndex >= 0 && suggestions[sugIndex]) {
+                      e.preventDefault();
+                      setSubmitText(suggestions[sugIndex].branch);
+                      setSugOpen(false);
+                      setSugIndex(-1);
+                      return;
+                    }
+                    void doSubmit();
+                  }
+                }}
+              />
+              {submitText && (
+                <button className="searchclear" title="清空" onClick={() => { setSubmitText(""); setSubmitMsg(null); }}>×</button>
+              )}
+            </span>
+            {sugOpen && suggestions.length > 0 && (
+              <div className="suglist">
+                {suggestions.map((b, i) => (
+                  <div
+                    key={b.branch}
+                    className={"sugitem" + (i === sugIndex ? " on" : "")}
+                    onMouseEnter={() => setSugIndex(i)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setSubmitText(b.branch);
+                      setSugOpen(false);
+                      setSugIndex(-1);
+                    }}
+                    title={b.branch}
+                  >
+                    <span className="sugname">{b.branch}</span>
+                    <span className="sugsha">{b.sha.slice(0, 8)}</span>
+                  </div>
+                ))}
+              </div>
             )}
           </span>
           <button className="mini" disabled={!submitText.trim() || submitBusy} onClick={() => void doSubmit()}>
             {submitBusy ? "提交中…" : "提交测试"}
           </button>
-          <datalist id="branch-options">
-            {branches.map((b) => (
-              <option key={b.branch} value={b.branch}>{b.sha.slice(0, 8)}</option>
-            ))}
-          </datalist>
           {submitMsg?.ok && <span className="submitmsg ok">✓ {submitMsg.text}</span>}
         </div>
         {submitMsg && !submitMsg.ok && (
