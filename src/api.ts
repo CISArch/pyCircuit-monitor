@@ -86,6 +86,23 @@ export interface QueueRow {
   started_at: string | null;
 }
 
+export interface BestEntry {
+  branch: string;
+  sha: string;
+  tested: boolean;
+  status?: string;
+  finishedAt?: string | null;
+  startedAt?: string | null;
+  pycircuit?: number | null;
+  verilator?: number | null;
+  ratio?: number | null;
+  matchN?: number;
+  rowN?: number;
+  mismatch?: boolean;
+  totalSeconds?: number | null;
+  taskDir?: string | null;
+}
+
 export interface Queue {
   available: boolean;
   rows?: QueueRow[];

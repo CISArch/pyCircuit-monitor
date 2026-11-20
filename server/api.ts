@@ -230,12 +230,8 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
   // The bot's state DB is a WAL database on a read-only mount: opening it
   // in place succeeds but the first prepare() fails (SQLite wants to create
   // -shm). Copy db + sidecars to a writable temp dir (≈15ms for 23MB) and
-  // read the copy; cached briefly because the queue barely changes.
-  const QUEUE_TTL_MS = 3000
-  let queueCache: { at: number; body: any } | null = null
-  let queueInflight: Promise<any> | null = null
-
-  async function readQueueRows(): Promise<any> {
+  // read the copy.
+  async function withStateDb<T>(fn: (db: any) => T): Promise<T> {
     const { DatabaseSync } = await import('node:sqlite')
     const { mkdir, copyFile, rm } = await import('node:fs/promises')
     const { tmpdir } = await import('node:os')
@@ -252,15 +248,21 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
     }
     const db = new DatabaseSync(copy, { timeout: 2000 } as any)
     try {
-      return db
+      return fn(db)
+    } finally {
+      db.close()
+    }
+  }
+
+  async function readQueueRows(): Promise<any> {
+    return withStateDb((db) =>
+      db
         .prepare(
           `SELECT delivery_id, branch, sha, status, created_at, started_at
            FROM tasks WHERE status IN ('pending','running') ORDER BY id`,
         )
-        .all()
-    } finally {
-      db.close()
-    }
+        .all(),
+    )
   }
 
   async function computeQueue(): Promise<any> {
@@ -278,6 +280,84 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
       }
     }
   }
+
+  // ---- /best: the Feishu bot's 最佳 view ----------------------------------
+  // For every remote branch at its current head SHA, take the newest finished
+  // task at that exact SHA and average its rows (arithmetic mean, same as
+  // feishu._average_metrics), sorted by P/V ratio desc; untested branches last.
+  const BEST_TTL_MS = 10000
+  let bestCache: { at: number; body: any } | null = null
+  let bestInflight: Promise<any> | null = null
+
+  async function computeBest(): Promise<any> {
+    const file = await stat(stateDb).catch(() => null)
+    if (!file?.isFile()) return { available: false, stateDb }
+    return withStateDb((db) => {
+      const refs = db.prepare('SELECT branch, sha FROM remote_refs ORDER BY branch').all() as any[]
+      const pick = db.prepare(
+        `SELECT id, status, finished_at, started_at, result_json FROM tasks
+         WHERE branch = ? AND sha = ? AND status IN ('pass','partial','fail','timeout')
+         ORDER BY id DESC LIMIT 1`,
+      )
+      const mean = (rows: any[], key: string, skip?: string): number | null => {
+        const vals: number[] = []
+        for (const r of rows) {
+          if (skip && r?.[skip]) continue
+          const v = r?.[key]
+          if (typeof v === 'number' && isFinite(v)) vals.push(v)
+        }
+        return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+      }
+      const entries = refs.map((ref: any) => {
+        const rec = pick.get(ref.branch, ref.sha) as any
+        if (!rec) return { branch: ref.branch, sha: ref.sha, tested: false }
+        let result: any = null
+        try { result = JSON.parse(rec.result_json) } catch { /* ignore */ }
+        const tr = Array.isArray(result?.rows) ? result.rows : []
+        const anyDiff = tr.some((r: any) => r && r.common_metrics_match === false)
+        return {
+          branch: ref.branch,
+          sha: ref.sha,
+          tested: true,
+          status: rec.status,
+          finishedAt: rec.finished_at,
+          startedAt: rec.started_at,
+          pycircuit: mean(tr, 'cycles_per_s', 'error'),
+          verilator: mean(tr, 'verilator_cycles_per_s', 'verilator_error'),
+          ratio: mean(tr, 'pycircuit_to_verilator_ratio'),
+          matchN: tr.filter((r: any) => r?.common_metrics_match === true).length,
+          rowN: tr.length,
+          mismatch: anyDiff,
+          totalSeconds: typeof result?.total_seconds === 'number' ? result.total_seconds : null,
+          taskDir: String(result?.local_log_dir ?? '').split('/').pop() || null,
+        }
+      })
+      const rank = (e: any) =>
+        e.tested ? (e.ratio == null ? Number.MAX_SAFE_INTEGER - 1 : -e.ratio) : Number.MAX_SAFE_INTEGER
+      entries.sort((a: any, b: any) => rank(a) - rank(b) || String(a.branch).localeCompare(String(b.branch)))
+      return {
+        available: true,
+        generatedAt: new Date().toISOString(),
+        total: entries.length,
+        tested: entries.filter((e: any) => e.tested).length,
+        entries,
+      }
+    })
+  }
+
+  function getBest(): Promise<any> {
+    const now = Date.now()
+    if (bestCache && now - bestCache.at < BEST_TTL_MS) return Promise.resolve(bestCache.body)
+    if (bestInflight) return bestInflight
+    bestInflight = computeBest()
+      .then((body) => { bestCache = { at: Date.now(), body }; return body })
+      .finally(() => { bestInflight = null })
+    return bestInflight
+  }
+
+  const QUEUE_TTL_MS = 3000
+  let queueCache: { at: number; body: any } | null = null
+  let queueInflight: Promise<any> | null = null
 
   function getQueue(): Promise<any> {
     const now = Date.now()
@@ -305,6 +385,13 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
 
     if (url.pathname === '/api/autoperf/queue') {
       void getQueue().then((body) => json(res, 200, body))
+      return
+    }
+
+    if (url.pathname === '/api/autoperf/best') {
+      void getBest()
+        .then((body) => json(res, 200, body))
+        .catch((e) => json(res, 200, { available: false, error: String(e?.message ?? e) }))
       return
     }
 

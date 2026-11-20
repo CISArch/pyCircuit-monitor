@@ -3,10 +3,11 @@
 pyCircuit 的**测试监控台 + IR 可视化**统一前端。前身 pyCircuit-graph（仓库已更名，
 旧 URL 自动重定向），IR 图谱保留为其中一个功能页，新增 auto_perf 实时监控台首页。
 
-两大功能页（顶部导航切换，URL `?view=` 持久化）：
+三个功能页（顶部导航切换，URL `?view=` 持久化）：
 
 1. **监控台（默认首页）** — auto_perf 测试机器人（DavinciBaseLine，HTTP :8790）的实时状态、历史与结果
-2. **IR 图谱** — 原有 pyc MLIR use-def 图可视化（pass 时间线 / diff）
+2. **最佳** — 迁移自飞书机器人 `最佳` 命令：各远端分支按 P/V ratio 从大到小排名（见下）
+3. **IR 图谱** — 原有 pyc MLIR use-def 图可视化（pass 时间线 / diff）
 
 ## 监控台（Dashboard）
 
@@ -36,6 +37,19 @@ pyCircuit 的**测试监控台 + IR 可视化**统一前端。前身 pyCircuit-g
 - `GET /api/autoperf/file|head|count?task=<name>&path=<rel>` — .mlir 读取（大文件流式，见 IR 图谱一节）
 - `GET /api/autoperf/queue` — 排队/运行中明细（读机器人状态库；只读挂载下用临时副本读取，3s 缓存）
 - 均有路径校验，禁止越出日志根目录。
+
+## 最佳（各分支排名）
+
+飞书机器人 `最佳`（`best` / `分支最佳`）命令的网页版，口径完全一致：
+
+- 从机器人状态库 `remote_refs` 取**全部远端分支的当前 head SHA**（77 个）；
+- 每个分支取该 SHA 上**最新一次已完成测试**（pass/partial/fail/timeout）的 result.json；
+- 对 rows 求算术平均：PyCircuit cycle/s（跳过 error 行）、Verilator cycle/s（跳过
+  verilator_error 行）、P/V ratio；与飞书 `_average_metrics` 同算法；
+- 按 **P/V ratio 从大到小**排名，未测分支置底（弱化显示）；
+- 每行「查看」跳到监控台并选中对应任务（详情/日志/IR 图谱全部可继续看）。
+
+接口：`GET /api/autoperf/best`（10s 缓存），返回 `{available,total,tested,entries[]}`。
 
 ## 本地开发
 

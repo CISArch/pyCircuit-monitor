@@ -80,8 +80,8 @@ function Sparkline(props: {
   );
 }
 
-export default function Dashboard(props: { onOpenGraph: (task?: string) => void }) {
-  const { onOpenGraph } = props;
+export default function Dashboard(props: { onOpenGraph: (task?: string) => void; openTask?: string | null }) {
+  const { onOpenGraph, openTask } = props;
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [queue, setQueue] = useState<Queue | null>(null);
@@ -123,6 +123,11 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
     () => tasks.find((t) => t.name === newestNoResult && displayStatus(t, health, newestNoResult) === "running") ?? null,
     [tasks, health, newestNoResult],
   );
+
+  // 从「最佳」页跳转进来：选中指定任务
+  useEffect(() => {
+    if (openTask) setSelected(openTask);
+  }, [openTask]);
 
   // 首屏自动选中正在运行的任务：打开页面直接看到实时日志，不用先点
   useEffect(() => {

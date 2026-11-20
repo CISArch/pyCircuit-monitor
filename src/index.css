@@ -285,3 +285,14 @@ button.more { margin-top: 8px; align-self: center; }
 .pbtn.on { background: #23405e; border-color: #4dd0e1; color: #4dd0e1; font-weight: 600; }
 .pbtn:disabled { opacity: 0.4; cursor: default; }
 .pdots { color: #55677e; padding: 0 2px; user-select: none; }
+
+/* 「最佳」页：排名色阶与未测行弱化 */
+.tasktable .rankcol { width: 44px; text-align: right; color: #6d7f95; font-variant-numeric: tabular-nums; }
+.tasktable .rankcol.r1 { color: #ffd54f; font-weight: 700; }
+.tasktable .rankcol.r2 { color: #cfd8dc; font-weight: 600; }
+.tasktable .rankcol.r3 { color: #d9a679; font-weight: 600; }
+.tasktable tr.bestrow.top1 td { background: rgba(255, 213, 79, 0.05); }
+.tasktable tr.bestrow td.ratio { color: #4dd0e1; font-weight: 600; }
+.tasktable .sha8 { color: #7d8fa5; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
+.tasktable tr.untested-head td { background: #0f141c; padding: 6px 10px; border-top: 1px solid #232c3b; }
+.tasktable tr.isuntested td { color: #55677e; }
