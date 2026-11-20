@@ -152,13 +152,12 @@ export const fmtDur = (s: number | null | undefined): string => {
   return (s / 3600).toFixed(1) + "h";
 };
 
+/** 统一时间展示（任务/排队同一格式：11/20 10:09:12） */
 export function fmtTime(ts: string | null, mtime?: number): string {
-  if (ts) {
-    const d = new Date(ts);
-    if (!isNaN(d.getTime())) {
-      return d.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-    }
-  }
-  if (mtime) return new Date(mtime).toLocaleString("zh-CN", { hour12: false });
-  return "—";
+  const ms = ts ? Date.parse(ts) : mtime ?? NaN;
+  if (isNaN(ms)) return "—";
+  return new Date(ms).toLocaleString("zh-CN", {
+    month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
 }

@@ -189,30 +189,47 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
       .map((r) => ({
         name: "queue:" + r.delivery_id,
         mtime: Date.parse(r.created_at) || 0,
-        ts: null,
+        ts: r.created_at,
         files: [],
         hasResult: false,
         branch: r.branch,
         sha: r.sha,
         queued: true,
       }));
-    const started = tasks.map((t) => ({ ...t, queued: false }));
-    const tms = (t: TaskSummary) => (t.ts ? Date.parse(t.ts) : t.mtime) || 0;
-    return [...queued, ...started].sort((a, b) => tms(b) - tms(a));
+    // 运行中的任务还没有 result.json，分支/SHA 从目录名反推不准；
+    // 用状态库里的同一任务（按名字尾部的 sha8 匹配）补正
+    const bySha = new Map<string, { branch: string; sha: string }>();
+    for (const r of queue?.rows ?? []) bySha.set((r.sha ?? "").slice(0, 8), { branch: r.branch, sha: r.sha });
+    const started = tasks.map((t) => {
+      const sha8 = t.name.slice(-8);
+      const hit = bySha.get(sha8);
+      return {
+        ...t,
+        queued: false,
+        branch: t.branch ?? hit?.branch,
+        sha: t.sha ?? hit?.sha,
+      };
+    });
+    return [...queued, ...started];
   }, [tasks, queue]);
 
   const rows = useMemo(() => {
     const q = branchFilter.trim().toLowerCase();
+    const tms = (t: TaskSummary) => (t.ts ? Date.parse(t.ts) : t.mtime) || 0;
+    // 展示顺序：1) 排队 2) 运行中 3) 已结束；组内按时间倒序（最后入队/最新的在上）
+    const group = (st: string) => (st === "queued" ? 0 : st === "running" ? 1 : 2);
     return tableRows
-      .filter((t) => {
-        const st = t.queued ? "queued" : displayStatus(t, health, newestNoResult);
+      .map((t) => ({ t, st: t.queued ? "queued" : displayStatus(t, health, newestNoResult) }))
+      .filter(({ t, st }) => {
         if (statusFilter !== "all" && st !== statusFilter) return false;
         if (q) {
           const hay = ((t.branch ?? "") + " " + t.name + " " + (t.sha ?? "")).toLowerCase();
           if (!hay.includes(q)) return false;
         }
         return true;
-      });
+      })
+      .sort((a, b) => group(a.st) - group(b.st) || tms(b.t) - tms(a.t))
+      .map(({ t }) => t);
   }, [tableRows, health, statusFilter, branchFilter, newestNoResult]);
 
   const histPages = Math.max(1, Math.ceil(rows.length / histPageSize));
