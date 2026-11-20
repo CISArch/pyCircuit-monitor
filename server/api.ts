@@ -108,6 +108,35 @@ async function tailLines(path: string, maxBytes = 65536, maxLines = 200): Promis
   }
 }
 
+/** 读取请求体（兼容 vite connect 与原生 http 两种情况）。 */
+function readBody(req: any, limit = 1 << 20): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (typeof req.body === 'string') return resolve(req.body)
+    if (req.body && typeof req.body === 'object') return resolve(JSON.stringify(req.body))
+    let size = 0
+    const chunks: Buffer[] = []
+    req.on('data', (c: Buffer) => {
+      size += c.length
+      if (size > limit) {
+        reject(new Error('请求体过大'))
+        req.destroy()
+        return
+      }
+      chunks.push(c)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')))
+    req.on('error', reject)
+  })
+}
+
+/** 回调落点：优先用 AUTO_PERF_CALLBACK_URL，否则按请求 Host 推断。 */
+function callbackUrlFor(req: any): string {
+  const configured = process.env.AUTO_PERF_CALLBACK_URL
+  if (configured) return configured
+  const host = req?.headers?.host ?? '127.0.0.1:4173'
+  return `http://${host}/api/autoperf/callback`
+}
+
 export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
   const logRoot = resolve(opts.logRoot ?? process.env.AUTO_PERF_LOG_DIR ?? '/tmp/auto_perf_logs')
   const apiBase = (
@@ -281,6 +310,26 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
     }
   }
 
+  // 远端分支名 + head SHA（机器人轮询 GitHub 写入 remote_refs），供输入框补全
+  let refsCache: { at: number; body: any } | null = null
+  async function computeRefs(): Promise<any> {
+    const file = await stat(stateDb).catch(() => null)
+    if (!file?.isFile()) return { available: false, branches: [] }
+    try {
+      const rows = await withStateDb((db) =>
+        db.prepare('SELECT branch, sha FROM remote_refs ORDER BY branch').all(),
+      )
+      return { available: true, branches: rows }
+    } catch (e: any) {
+      return { available: false, branches: [], error: String(e?.message ?? e) }
+    }
+  }
+  function getRefs(): Promise<any> {
+    const now = Date.now()
+    if (refsCache && now - refsCache.at < 30000) return Promise.resolve(refsCache.body)
+    return computeRefs().then((body) => { refsCache = { at: Date.now(), body }; return body })
+  }
+
   // ---- /best: the Feishu bot's 最佳 view ----------------------------------
   // For every remote branch at its current head SHA, take the newest finished
   // task at that exact SHA and average its rows (arithmetic mean, same as
@@ -385,6 +434,67 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
 
     if (url.pathname === '/api/autoperf/queue') {
       void getQueue().then((body) => json(res, 200, body))
+      return
+    }
+
+    if (url.pathname === '/api/autoperf/refs') {
+      void getRefs().then((body) => json(res, 200, body))
+      return
+    }
+
+    // 手动提测：转发机器人 Local API（POST /api/tasks + commit），错误原样透传
+    if (url.pathname === '/api/autoperf/submit' && req.method === 'POST') {
+      void (async () => {
+        let commit = ''
+        try {
+          const raw = await readBody(req)
+          const body = JSON.parse(raw || '{}')
+          commit = String(body?.commit ?? '').trim()
+        } catch {
+          json(res, 400, { ok: false, error: '请求体不是合法 JSON' })
+          return
+        }
+        if (!commit) {
+          json(res, 400, { ok: false, error: '请输入分支名或至少 7 位 commit SHA' })
+          return
+        }
+        const callback = callbackUrlFor(req)
+        const ac = new AbortController()
+        const timer = setTimeout(() => ac.abort(), 25000)
+        try {
+          const r = await fetch(`${apiBase}/api/tasks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ commit, callback_url: callback }),
+            signal: ac.signal,
+          })
+          const text = await r.text()
+          let payload: any = null
+          try { payload = JSON.parse(text) } catch { /* not json */ }
+          if (!r.ok) {
+            json(res, 200, { ok: false, error: payload?.error ?? `机器人返回 HTTP ${r.status}` })
+            return
+          }
+          refsCache = null // 入队后刷新补全列表
+          json(res, 200, {
+            ok: true,
+            taskId: payload?.task_id ?? null,
+            branch: payload?.branch ?? commit,
+            sha: payload?.sha ?? null,
+          })
+        } catch (e: any) {
+          const msg = e?.name === 'AbortError' ? '机器人响应超时（25s）' : String(e?.message ?? e)
+          json(res, 200, { ok: false, error: msg })
+        } finally {
+          clearTimeout(timer)
+        }
+      })()
+      return
+    }
+
+    // 机器人完成回调落点（我们以轮询为主，这里只确认收到）
+    if (url.pathname === '/api/autoperf/callback' && req.method === 'POST') {
+      void readBody(req).finally(() => json(res, 200, { ok: true }))
       return
     }
 

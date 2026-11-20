@@ -95,12 +95,28 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
   const [branchFilter, setBranchFilter] = useState("");
   const [histPage, setHistPage] = useState(1);
   const [histPageSize, setHistPageSize] = useState(10);
+  // 手动提测
+  const [submitText, setSubmitText] = useState("");
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [submitMsg, setSubmitMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [branches, setBranches] = useState<{ branch: string; sha: string }[]>([]);
   const logStateRef = useRef<LogPage | null>(null);
   logStateRef.current = logPage;
   const logPageSizeRef = useRef(100);
   logPageSizeRef.current = logPageSize;
   const detailRef = useRef<HTMLDivElement>(null);
   const autoPickedRef = useRef(false);
+
+  // 分支补全列表（机器人 remote_refs）
+  const loadRefs = useCallback(async () => {
+    try {
+      const r = await fetch("/api/autoperf/refs");
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d?.available) setBranches(d.branches ?? []);
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => { void loadRefs(); }, [loadRefs]);
 
   // ---- polling ----
   const refresh = useCallback(async () => {
@@ -135,6 +151,38 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
     autoPickedRef.current = true;
     setSelected(runningTask.name);
   }, [runningTask, selected]);
+
+  // ---- 手动提测：转发机器人 Local API ----
+  const doSubmit = useCallback(async () => {
+    const commit = submitText.trim();
+    if (!commit || submitBusy) return;
+    setSubmitBusy(true);
+    setSubmitMsg(null);
+    try {
+      const r = await fetch("/api/autoperf/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commit }),
+      });
+      const d = await r.json();
+      if (d?.ok) {
+        setSubmitMsg({
+          ok: true,
+          text: `已入队：${d.branch ?? commit}${d.sha ? " @" + String(d.sha).slice(0, 8) : ""}（task ${d.taskId ?? "-"}）`,
+        });
+        setSubmitText("");
+        void refresh();
+        void loadRefs();
+        void fetchQueue().then((q) => q && setQueue(q));
+      } else {
+        setSubmitMsg({ ok: false, text: d?.error ?? "提交失败" });
+      }
+    } catch (e) {
+      setSubmitMsg({ ok: false, text: "提交失败：" + String(e) });
+    } finally {
+      setSubmitBusy(false);
+    }
+  }, [submitText, submitBusy, refresh, loadRefs]);
 
   // ---- detail loading (auto-refresh while running) ----
   const loadDetail = useCallback(async (name: string) => {
@@ -323,6 +371,34 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
             </span>
           </span>
         </div>
+        <div className="submitbar">
+          <span className="dim">手动提测</span>
+          <span className="searchwrap">
+            <input
+              className="submitq"
+              list="branch-options"
+              placeholder="分支名，或 ≥7 位 commit SHA（回车提交）"
+              value={submitText}
+              onChange={(e) => { setSubmitText(e.target.value); setSubmitMsg(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") void doSubmit(); }}
+            />
+            {submitText && (
+              <button className="searchclear" title="清空" onClick={() => { setSubmitText(""); setSubmitMsg(null); }}>×</button>
+            )}
+          </span>
+          <button className="mini" disabled={!submitText.trim() || submitBusy} onClick={() => void doSubmit()}>
+            {submitBusy ? "提交中…" : "提交测试"}
+          </button>
+          <datalist id="branch-options">
+            {branches.map((b) => (
+              <option key={b.branch} value={b.branch}>{b.sha.slice(0, 8)}</option>
+            ))}
+          </datalist>
+          {submitMsg?.ok && <span className="submitmsg ok">✓ {submitMsg.text}</span>}
+        </div>
+        {submitMsg && !submitMsg.ok && (
+          <div className="submiterr">✗ {submitMsg.text}</div>
+        )}
         {runningTask && (
           <div className="runline" onClick={() => setSelected(runningTask.name)}>
             <StatusBadge s="running" />

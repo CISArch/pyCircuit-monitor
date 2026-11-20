@@ -27,6 +27,14 @@ pyCircuit 的**测试监控台 + IR 可视化**统一前端。前身 pyCircuit-g
   同分支 P/V 与 cycle/s 走势图（内联 SVG，可点击跳转）、execution.log 分页查看（带行号整页翻页，无内部滚动条；默认末页，运行中任务 5s 跟随最新页）、
   一键「在 IR 图谱中查看」该任务的 pass dump 时间线。
 
+### 手动提测
+
+监控台历史表标题下方有「手动提测」输入框：填**完整分支名**或**≥7 位 commit SHA**
+（带分支名补全，数据来自机器人 `remote_refs`），回车或点「提交测试」即调用机器人
+Local API 入队；成功后提示 `已入队：<分支> @<sha8>（task <id>）`，失败（分支/哈希不存在、
+格式不对、机器人不可达）以红色块给出机器人返回的**原始错误**（含候选分支清单）。
+接口：`POST /api/autoperf/submit {commit}`（服务端转发到 `:8790/api/tasks`，含自动回调地址）。
+
 ### API（dev 与容器共用 `server/api.ts`，零 npm 依赖）
 
 - `GET /api/autoperf/tasks` — 任务列表 + result.json 摘要（gmCps/gmPV/MATCH/耗时，3s 缓存）

@@ -309,3 +309,19 @@ button.more { margin-top: 8px; align-self: center; }
   color: #7d8fa5; font-size: 15px; cursor: pointer;
 }
 .searchclear:hover { color: #dbe2ea; background: #232c3b; }
+
+/* 手动提测条 */
+.submitbar { display: flex; align-items: center; gap: 8px; padding: 4px 0 8px; flex-wrap: wrap; }
+.submitq {
+  width: 360px; background: #0d1117; color: #c9d6e3;
+  border: 1px solid #232c3b; border-radius: 6px; padding: 4px 24px 4px 9px; font-size: 12.5px;
+}
+.submitq:focus { outline: none; border-color: #2c4a66; }
+.submitmsg { font-size: 12px; max-width: 720px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.submitmsg.ok { color: #81c784; }
+.submitmsg.err { color: #e57373; }
+.submiterr {
+  margin: 0 0 8px; padding: 6px 10px; max-height: 160px; overflow: auto;
+  background: #241010; border: 1px solid #5c2b2b; border-radius: 6px;
+  color: #e57373; font-size: 12px; line-height: 1.5; white-space: pre-wrap;
+}
