@@ -41,37 +41,118 @@ function relTime(iso: string | null | undefined): string {
 
 interface SparkPoint { x: number; y: number; name: string; status: string; ts: string | null }
 
-function Sparkline(props: {
-  points: SparkPoint[]; unit: string; title: string; color: string; digits?: number;
+/** 数值轴取整刻度：返回 [lo, hi, step] */
+function niceTicks(min: number, max: number, count = 4): [number, number, number] {
+  if (!isFinite(min) || !isFinite(max)) return [0, 1, 0.25];
+  if (min === max) { const pad = Math.abs(min) * 0.1 || 1; return [min - pad, max + pad, pad / 2]; }
+  const raw = (max - min) / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const lo = Math.floor(min / step) * step;
+  const hi = Math.ceil(max / step) * step;
+  return [lo, hi, step];
+}
+
+/** P/V 走势：带横纵坐标轴、网格与刻度的自适应折线图 */
+function PVChart(props: {
+  points: SparkPoint[]; title: string; color: string; mutedColor: string; borderColor: string;
   selected: string | null; onSelect: (name: string) => void;
 }) {
-  const { points, unit, title, color, digits = 3, selected, onSelect } = props;
-  const W = 800, H = 92, padY = 12;
-  if (!points.length) return null;
-  const xs = points.map((p) => p.x), ys = points.map((p) => p.y);
-  const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const sx = (maxX - minX) || 1, sy = (maxY - minY) || 1;
-  const px = (x: number) => 8 + ((x - minX) / sx) * (W - 16);
-  const py = (y: number) => H - padY - ((y - minY) / sy) * (H - padY * 2);
-  const d = points.map((p, i) => (i ? "L" : "M") + px(p.x).toFixed(1) + " " + py(p.y).toFixed(1)).join(" ");
+  const { points, title, color, mutedColor, borderColor, selected, onSelect } = props;
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(720);
+
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el) return;
+    const apply = () => setWidth(Math.max(el.clientWidth, 320));
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const H = 240;
+  const M = { top: 14, right: 18, bottom: 30, left: 58 };
+  const iw = Math.max(width - M.left - M.right, 40);
+  const ih = H - M.top - M.bottom;
+
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const [ylo, yhi, ystep] = niceTicks(Math.min(...ys), Math.max(...ys), 4);
+  const sx = (x: number) => M.left + (x1 === x0 ? iw / 2 : ((x - x0) / (x1 - x0)) * iw);
+  const sy = (y: number) => M.top + ih - ((y - ylo) / (yhi - ylo || 1)) * ih;
+
+  const yTicks: number[] = [];
+  for (let v = ylo; v <= yhi + ystep * 0.001; v += ystep) yTicks.push(v);
+
+  // 横轴：均匀取 5 个时间刻度
+  const xTickCount = Math.min(5, points.length);
+  const xTicks: number[] = [];
+  for (let i = 0; i < xTickCount; i++) {
+    xTicks.push(x0 + ((x1 - x0) * i) / Math.max(xTickCount - 1, 1));
+  }
+  const spanDays = (x1 - x0) / 86400000;
+  const fmtTick = (t: number) => {
+    const dt = new Date(t);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return spanDays >= 1
+      ? `${pad(dt.getMonth() + 1)}/${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`
+      : `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  };
+
+  const path = points
+    .map((p, i) => (i ? "L" : "M") + sx(p.x).toFixed(1) + " " + sy(p.y).toFixed(1))
+    .join(" ");
+
   return (
-    <div style={{ flex: 1, minWidth: 320 }}>
-      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 2 }}>
+    <div ref={hostRef} style={{ width: "100%" }}>
+      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 4 }}>
         {title}
-        <span style={{ float: "right" }}>
-          {fmtNum(minY, digits)} ~ {fmtNum(maxY, digits)} {unit}
-        </span>
+        <span style={{ float: "right" }}>{fmtNum(ylo, 3)} ~ {fmtNum(yhi, 3)} ×</span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 92 }}>
-        <path d={d} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+      <svg width={width} height={H} style={{ display: "block" }}>
+        {/* 横向网格 + 纵轴刻度 */}
+        {yTicks.map((v) => (
+          <g key={"y" + v}>
+            <line x1={M.left} y1={sy(v)} x2={M.left + iw} y2={sy(v)} stroke={borderColor} strokeDasharray="3 4" opacity={0.55} />
+            <text x={M.left - 8} y={sy(v) + 4} textAnchor="end" fontSize={11} fill={mutedColor}>
+              {v.toFixed(2)}
+            </text>
+          </g>
+        ))}
+        {/* 纵轴 / 横轴 */}
+        <line x1={M.left} y1={M.top} x2={M.left} y2={M.top + ih} stroke={borderColor} />
+        <line x1={M.left} y1={M.top + ih} x2={M.left + iw} y2={M.top + ih} stroke={borderColor} />
+        {/* 横轴刻度 */}
+        {xTicks.map((t, i) => (
+          <g key={"x" + i}>
+            <line x1={sx(t)} y1={M.top + ih} x2={sx(t)} y2={M.top + ih + 4} stroke={borderColor} />
+            <text x={sx(t)} y={M.top + ih + 17} textAnchor="middle" fontSize={11} fill={mutedColor}>
+              {fmtTick(t)}
+            </text>
+          </g>
+        ))}
+        {/* 折线 + 数据点 */}
+        <path d={path} fill="none" stroke={color} strokeWidth={2} />
         {points.map((p, i) => (
-          <circle key={p.name + i} cx={px(p.x)} cy={py(p.y)} r={selected === p.name ? 5 : 3}
-            fill={p.status === "pass" ? color : "#e57373"} style={{ cursor: "pointer" }}
-            onClick={() => onSelect(p.name)}>
-            <title>{(p.ts ?? "") + "\n" + fmtNum(p.y, digits) + " " + unit + "\n" + p.name}</title>
+          <circle
+            key={p.name + i}
+            cx={sx(p.x)}
+            cy={sy(p.y)}
+            r={selected === p.name ? 6 : 3.5}
+            fill={p.status === "pass" ? color : "#e57373"}
+            stroke={selected === p.name ? color : "none"}
+            strokeWidth={2}
+            style={{ cursor: "pointer" }}
+            onClick={() => onSelect(p.name)}
+          >
+            <title>{(p.ts ?? "") + "\nP/V " + fmtNum(p.y, 3) + "\n" + p.name}</title>
           </circle>
         ))}
+        <text x={M.left - 8} y={M.top - 2} textAnchor="end" fontSize={10} fill={mutedColor}>P/V</text>
       </svg>
     </div>
   );
@@ -215,14 +296,14 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
   }, [selected, selRunning, loadLog, logPageSize]);
 
   const trend = useMemo(() => {
-    if (!detail?.result) return { pv: [] as SparkPoint[], cps: [] as SparkPoint[] };
+    if (!detail?.result) return { pv: [] as SparkPoint[] };
     const branch = detail.result.branch;
     const same = tasks
-      .filter((t) => t.hasResult && t.branch === branch && (t.gmPV != null || t.gmCps != null) && t.ts)
-      .sort((a, b) => (a.ts! < b.ts! ? -1 : 1)).slice(-40);
+      .filter((t) => t.hasResult && t.branch === branch && t.gmPV != null && t.ts)
+      .sort((a, b) => (a.ts! < b.ts! ? -1 : 1))
+      .slice(-40);
     return {
-      pv: same.filter((t) => t.gmPV != null).map((t) => ({ x: Date.parse(t.ts!), y: t.gmPV!, name: t.name, status: t.status ?? "", ts: t.ts })),
-      cps: same.filter((t) => t.gmCps != null).map((t) => ({ x: Date.parse(t.ts!), y: t.gmCps!, name: t.name, status: t.status ?? "", ts: t.ts })),
+      pv: same.map((t) => ({ x: Date.parse(t.ts!), y: t.gmPV!, name: t.name, status: t.status ?? "", ts: t.ts })),
     };
   }, [detail, tasks]);
 
@@ -446,13 +527,18 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
                 ]}
               />
               {detail.result.error && <Alert type="error" showIcon message={detail.result.error} style={{ marginBottom: 12 }} />}
-              {(trend.pv.length > 1 || trend.cps.length > 1) && (
-                <Space style={{ width: "100%", marginBottom: 12 }} size={16} wrap>
-                  <Sparkline points={trend.pv} title={`「${detail.result.branch}」P/V 走势`} unit="×" digits={3}
-                    color={token.colorPrimary} selected={selected} onSelect={setSelected} />
-                  <Sparkline points={trend.cps} title={`「${detail.result.branch}」cycle/s 走势`} unit="cyc/s" digits={0}
-                    color={token.colorSuccess} selected={selected} onSelect={setSelected} />
-                </Space>
+              {trend.pv.length > 1 && (
+                <div style={{ marginBottom: 14 }}>
+                  <PVChart
+                    points={trend.pv}
+                    title={`「${detail.result.branch}」P/V 走势（最近 ${trend.pv.length} 次）`}
+                    color={token.colorPrimary}
+                    mutedColor={token.colorTextSecondary}
+                    borderColor={token.colorBorderSecondary}
+                    selected={selected}
+                    onSelect={setSelected}
+                  />
+                </div>
               )}
               <Table
                 size="small" rowKey="trace_name" style={{ marginBottom: 12 }}
