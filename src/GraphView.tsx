@@ -714,12 +714,17 @@ export default function GraphView() {
             }}
           /> comb 折叠
         </label>
-        <input
-          className="search"
-          placeholder="搜索 SSA 名 / op…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <span className="searchwrap">
+          <input
+            className="search"
+            placeholder="搜索 SSA 名 / op…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <button className="searchclear" title="清空搜索" onClick={() => setSearch("")}>×</button>
+          )}
+        </span>
         <span className="stat">
           {graph.nodes.length} nodes / {graph.edges.length} edges
           {diff && (

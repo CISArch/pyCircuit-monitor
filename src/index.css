@@ -296,3 +296,16 @@ button.more { margin-top: 8px; align-self: center; }
 .tasktable .sha8 { color: #7d8fa5; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
 .tasktable tr.untested-head td { background: #0f141c; padding: 6px 10px; border-top: 1px solid #232c3b; }
 .tasktable tr.isuntested td { color: #55677e; }
+
+/* 搜索框清除按钮 */
+.searchwrap { position: relative; display: inline-flex; align-items: center; }
+.searchwrap .branchq { padding-right: 24px; }
+.searchwrap .search { padding-right: 22px; }
+.searchclear {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 18px; height: 18px; line-height: 1; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: 50%;
+  color: #7d8fa5; font-size: 15px; cursor: pointer;
+}
+.searchclear:hover { color: #dbe2ea; background: #232c3b; }

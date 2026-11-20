@@ -51,12 +51,17 @@ export default function Best(props: { onOpenTask: (task: string) => void }) {
           </span>
           <span className="dim">按 P/V ratio（PyCircuit ÷ Verilator）从大到小；数字取该分支当前 head commit 最新一次已完成测试的算术平均</span>
           <span className="filters">
-            <input
-              className="branchq"
-              placeholder="按分支 / SHA 过滤…"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
+            <span className="searchwrap">
+              <input
+                className="branchq"
+                placeholder="按分支 / SHA 过滤…"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+              {filter && (
+                <button className="searchclear" title="清空搜索" onClick={() => setFilter("")}>×</button>
+              )}
+            </span>
           </span>
         </div>
         {error ? (

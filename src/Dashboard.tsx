@@ -310,12 +310,17 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
               <option value="queued">排队中</option>
               <option value="interrupted">已中断</option>
             </select>
-            <input
-              className="branchq"
-              placeholder="按分支 / SHA / 目录过滤…"
-              value={branchFilter}
-              onChange={(e) => setBranchFilter(e.target.value)}
-            />
+            <span className="searchwrap">
+              <input
+                className="branchq"
+                placeholder="按分支 / SHA / 目录过滤…"
+                value={branchFilter}
+                onChange={(e) => setBranchFilter(e.target.value)}
+              />
+              {branchFilter && (
+                <button className="searchclear" title="清空搜索" onClick={() => setBranchFilter("")}>×</button>
+              )}
+            </span>
           </span>
         </div>
         {runningTask && (
