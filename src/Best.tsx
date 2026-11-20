@@ -3,9 +3,9 @@ import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 import { fmtNum, fmtTime, type BestEntry } from "./api";
 
-const STATUS_TAG: Record<string, { label: string; color: string; bg?: string }> = {
+const STATUS_TAG: Record<string, { label: string; color: string }> = {
   pass: { label: "PASS", color: "success" },
-  partial: { label: "PARTIAL", color: "warning", bg: "#b45309" },
+  partial: { label: "PARTIAL", color: "warning" },
   fail: { label: "FAIL", color: "error" },
   timeout: { label: "TIMEOUT", color: "purple" },
 };
@@ -64,12 +64,9 @@ export default function Best(props: { onOpenTask: (task: string) => void }) {
     {
       title: "状态", width: 96,
       render: (_: unknown, e) => {
-        if (!e.tested) return <Tag variant="filled">未测试</Tag>;
+        if (!e.tested) return <Tag variant="outlined">未测试</Tag>;
         const m = STATUS_TAG[e.status ?? ""] ?? { label: e.status ?? "-", color: "default" };
-        if (m.bg) {
-          return <Tag style={{ background: m.bg, borderColor: m.bg, color: "#fff", fontWeight: 600 }}>{m.label}</Tag>;
-        }
-        return <Tag color={m.color} variant="filled">{m.label}</Tag>;
+        return <Tag color={m.color} variant="outlined">{m.label}</Tag>;
       },
     },
     { title: "测试时间", width: 128, render: (_: unknown, e) => fmtTime(e.finishedAt ?? e.startedAt ?? null) },

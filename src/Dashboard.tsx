@@ -11,10 +11,9 @@ import {
   type DisplayStatus, type Health, type LogPage, type Queue, type TaskDetail, type TaskSummary,
 } from "./api";
 
-const STATUS_META: Record<DisplayStatus, { label: string; color: string; bg?: string }> = {
+const STATUS_META: Record<DisplayStatus, { label: string; color: string }> = {
   pass: { label: "PASS", color: "success" },
-  // 浅色 warning 在深色底上发灰，改用实心深橙 + 白字
-  partial: { label: "PARTIAL", color: "warning", bg: "#b45309" },
+  partial: { label: "PARTIAL", color: "warning" },
   fail: { label: "FAIL", color: "error" },
   timeout: { label: "TIMEOUT", color: "purple" },
   running: { label: "运行中", color: "processing" },
@@ -22,16 +21,11 @@ const STATUS_META: Record<DisplayStatus, { label: string; color: string; bg?: st
   interrupted: { label: "已中断", color: "default" },
 };
 
+/** 状态标签统一用小号描边样式：语义色由 antd 主题算法给出（明暗各一套），
+ *  只加边框不提亮底色，避免深色底上发灰或过重。 */
 const StatusTag = ({ s }: { s: DisplayStatus }) => {
   const m = STATUS_META[s] ?? STATUS_META.interrupted;
-  if (m.bg) {
-    return (
-      <Tag style={{ marginInlineEnd: 0, background: m.bg, borderColor: m.bg, color: "#fff", fontWeight: 600 }}>
-        {m.label}
-      </Tag>
-    );
-  }
-  return <Tag color={m.color} variant="filled" style={{ marginInlineEnd: 0 }}>{m.label}</Tag>;
+  return <Tag color={m.color} variant="outlined" style={{ marginInlineEnd: 0 }}>{m.label}</Tag>;
 };
 
 function relTime(iso: string | null | undefined): string {
@@ -308,18 +302,18 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
               {dataSource.length} 个任务 · 10s 自动刷新
             </Typography.Text>
             {health === null ? (
-              <Tag icon={<LoadingOutlined spin />} variant="filled">连接中…</Tag>
+              <Tag icon={<LoadingOutlined spin />} variant="outlined">连接中…</Tag>
             ) : (
-              <Tag color={botUp ? "green" : "red"} variant="filled">{botUp ? "在线 :8790" : "不可达"}</Tag>
+              <Tag color={botUp ? "green" : "red"} variant="outlined">{botUp ? "在线 :8790" : "不可达"}</Tag>
             )}
             {counts && (
               <Space size={[6, 4]} wrap>
-                <Tag color="processing" variant="filled">运行 {counts.running ?? 0}</Tag>
-                <Tag color="gold" variant="filled">排队 {counts.pending ?? 0}</Tag>
-                <Tag color="green" variant="filled">PASS {counts.pass ?? 0}</Tag>
-                <Tag variant="filled" style={{ background: "#b45309", borderColor: "#b45309", color: "#fff" }}>PARTIAL {counts.partial ?? 0}</Tag>
-                <Tag color="red" variant="filled">FAIL {counts.fail ?? 0}</Tag>
-                <Tag color="purple" variant="filled">TIMEOUT {counts.timeout ?? 0}</Tag>
+                <Tag color="processing" variant="outlined">运行 {counts.running ?? 0}</Tag>
+                <Tag color="gold" variant="outlined">排队 {counts.pending ?? 0}</Tag>
+                <Tag color="success" variant="outlined">PASS {counts.pass ?? 0}</Tag>
+                <Tag color="warning" variant="outlined">PARTIAL {counts.partial ?? 0}</Tag>
+                <Tag color="error" variant="outlined">FAIL {counts.fail ?? 0}</Tag>
+                <Tag color="purple" variant="outlined">TIMEOUT {counts.timeout ?? 0}</Tag>
               </Space>
             )}
           </Space>
@@ -473,8 +467,8 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
                   {
                     title: "一致性", width: 96, align: "center",
                     render: (_: unknown, r) => (r.common_metrics_match
-                      ? <Tag color="success" variant="filled">MATCH</Tag>
-                      : <Tooltip title={r.error}><Tag color="error" variant="filled">{r.error ? "ERROR" : "DIFF"}</Tag></Tooltip>),
+                      ? <Tag color="success" variant="outlined">MATCH</Tag>
+                      : <Tooltip title={r.error}><Tag color="error" variant="outlined">{r.error ? "ERROR" : "DIFF"}</Tag></Tooltip>),
                   },
                 ]}
               />
@@ -486,7 +480,7 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
           <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 6 }} wrap>
             <Space size={8}>
               <Typography.Text strong style={{ fontSize: 12.5 }}>execution.log</Typography.Text>
-              {selRunning && <Tag color="processing" variant="filled">跟随最新 · 5s</Tag>}
+              {selRunning && <Tag color="processing" variant="outlined">跟随最新 · 5s</Tag>}
             </Space>
             <Space size={8}>
               {detail && detail.files.length > 0 && (
