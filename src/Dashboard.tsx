@@ -2,6 +2,7 @@ import {
   Alert, AutoComplete, Button, Card, Descriptions, Empty, Input, Pagination, Select, Space,
   Table, Tag, Tooltip, Typography, theme,
 } from "antd";
+import { LoadingOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -10,9 +11,10 @@ import {
   type DisplayStatus, type Health, type LogPage, type Queue, type TaskDetail, type TaskSummary,
 } from "./api";
 
-const STATUS_META: Record<DisplayStatus, { label: string; color: string }> = {
+const STATUS_META: Record<DisplayStatus, { label: string; color: string; bg?: string }> = {
   pass: { label: "PASS", color: "success" },
-  partial: { label: "PARTIAL", color: "warning" },
+  // 浅色 warning 在深色底上发灰，改用实心深橙 + 白字
+  partial: { label: "PARTIAL", color: "warning", bg: "#b45309" },
   fail: { label: "FAIL", color: "error" },
   timeout: { label: "TIMEOUT", color: "purple" },
   running: { label: "运行中", color: "processing" },
@@ -22,6 +24,13 @@ const STATUS_META: Record<DisplayStatus, { label: string; color: string }> = {
 
 const StatusTag = ({ s }: { s: DisplayStatus }) => {
   const m = STATUS_META[s] ?? STATUS_META.interrupted;
+  if (m.bg) {
+    return (
+      <Tag style={{ marginInlineEnd: 0, background: m.bg, borderColor: m.bg, color: "#fff", fontWeight: 600 }}>
+        {m.label}
+      </Tag>
+    );
+  }
   return <Tag color={m.color} variant="filled" style={{ marginInlineEnd: 0 }}>{m.label}</Tag>;
 };
 
@@ -79,6 +88,7 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
   const { token } = theme.useToken();
 
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
   const [queue, setQueue] = useState<Queue | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -100,14 +110,18 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
 
   const refresh = useCallback(async () => {
     const [t, h] = await Promise.all([fetchTasks(), fetchHealth()]);
-    if (t) setTasks(t.tasks);
-    setHealth(h);
+    if (t) { setTasks(t.tasks); setLoaded(true); }
+    // 请求失败也要落地状态，避免一直停在「连接中」
+    setHealth(h ?? { ok: false, error: "无法连接机器人" });
   }, []);
 
   useEffect(() => {
     void refresh();
     const t1 = setInterval(() => void refresh(), 10000);
-    const t2 = setInterval(() => void fetchHealth().then((h) => h && setHealth(h)), 5000);
+    const t2 = setInterval(
+      () => void fetchHealth().then((h) => setHealth(h ?? { ok: false, error: "无法连接机器人" })),
+      5000,
+    );
     const t3 = setInterval(() => void fetchQueue().then((q) => q && setQueue(q)), 10000);
     void fetchQueue().then((q) => q && setQueue(q));
     return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3); };
@@ -293,13 +307,17 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
             <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
               {dataSource.length} 个任务 · 10s 自动刷新
             </Typography.Text>
-            <Tag color={botUp ? "green" : "red"} variant="filled">{botUp ? "在线 :8790" : "不可达"}</Tag>
+            {health === null ? (
+              <Tag icon={<LoadingOutlined spin />} variant="filled">连接中…</Tag>
+            ) : (
+              <Tag color={botUp ? "green" : "red"} variant="filled">{botUp ? "在线 :8790" : "不可达"}</Tag>
+            )}
             {counts && (
               <Space size={[6, 4]} wrap>
                 <Tag color="processing" variant="filled">运行 {counts.running ?? 0}</Tag>
                 <Tag color="gold" variant="filled">排队 {counts.pending ?? 0}</Tag>
                 <Tag color="green" variant="filled">PASS {counts.pass ?? 0}</Tag>
-                <Tag color="orange" variant="filled">PARTIAL {counts.partial ?? 0}</Tag>
+                <Tag variant="filled" style={{ background: "#b45309", borderColor: "#b45309", color: "#fff" }}>PARTIAL {counts.partial ?? 0}</Tag>
                 <Tag color="red" variant="filled">FAIL {counts.fail ?? 0}</Tag>
                 <Tag color="purple" variant="filled">TIMEOUT {counts.timeout ?? 0}</Tag>
               </Space>
@@ -382,6 +400,7 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
           rowKey="name"
           columns={columns}
           dataSource={pageRows}
+          loading={!loaded}
           pagination={{
             current: histPage,
             pageSize: histPageSize,

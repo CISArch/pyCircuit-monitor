@@ -3,9 +3,9 @@ import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 import { fmtNum, fmtTime, type BestEntry } from "./api";
 
-const STATUS_TAG: Record<string, { label: string; color: string }> = {
+const STATUS_TAG: Record<string, { label: string; color: string; bg?: string }> = {
   pass: { label: "PASS", color: "success" },
-  partial: { label: "PARTIAL", color: "warning" },
+  partial: { label: "PARTIAL", color: "warning", bg: "#b45309" },
   fail: { label: "FAIL", color: "error" },
   timeout: { label: "TIMEOUT", color: "purple" },
 };
@@ -66,6 +66,9 @@ export default function Best(props: { onOpenTask: (task: string) => void }) {
       render: (_: unknown, e) => {
         if (!e.tested) return <Tag variant="filled">未测试</Tag>;
         const m = STATUS_TAG[e.status ?? ""] ?? { label: e.status ?? "-", color: "default" };
+        if (m.bg) {
+          return <Tag style={{ background: m.bg, borderColor: m.bg, color: "#fff", fontWeight: 600 }}>{m.label}</Tag>;
+        }
         return <Tag color={m.color} variant="filled">{m.label}</Tag>;
       },
     },
@@ -114,6 +117,7 @@ export default function Best(props: { onOpenTask: (task: string) => void }) {
         rowKey={(e) => e.branch + e.sha}
         columns={columns}
         dataSource={rows}
+        loading={!data && !error}
         pagination={{
           pageSize: 20, size: "small", position: ["bottomRight"],
           showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100],
