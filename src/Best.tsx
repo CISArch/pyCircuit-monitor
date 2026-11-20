@@ -1,14 +1,17 @@
+import { Alert, Button, Card, Input, Space, Table, Tag, Tooltip, Typography, theme } from "antd";
+import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
-import { fmtDur, fmtNum, fmtTime, type BestEntry } from "./api";
+import { fmtNum, fmtTime, type BestEntry } from "./api";
 
-const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
-  pass: { label: "PASS", cls: "st-pass" },
-  partial: { label: "PARTIAL", cls: "st-partial" },
-  fail: { label: "FAIL", cls: "st-fail" },
-  timeout: { label: "TIMEOUT", cls: "st-timeout" },
+const STATUS_TAG: Record<string, { label: string; color: string }> = {
+  pass: { label: "PASS", color: "success" },
+  partial: { label: "PARTIAL", color: "warning" },
+  fail: { label: "FAIL", color: "error" },
+  timeout: { label: "TIMEOUT", color: "purple" },
 };
 
 export default function Best(props: { onOpenTask: (task: string) => void }) {
+  const { token } = theme.useToken();
   const [data, setData] = useState<{ total: number; tested: number; entries: BestEntry[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -35,107 +38,91 @@ export default function Best(props: { onOpenTask: (task: string) => void }) {
   const rows = useMemo(() => {
     const q = filter.trim().toLowerCase();
     const all = data?.entries ?? [];
-    return q ? all.filter((e) => (e.branch + " " + e.sha).toLowerCase().includes(q)) : all;
+    const list = q ? all.filter((e) => (e.branch + " " + e.sha).toLowerCase().includes(q)) : all;
+    let rank = 0;
+    return list.map((e) => ({ ...e, rank: e.tested ? ++rank : 0 }));
   }, [data, filter]);
 
-  const tested = rows.filter((e) => e.tested);
-  const untested = rows.filter((e) => !e.tested);
+  const columns: ColumnsType<BestEntry & { rank: number }> = [
+    {
+      title: "#", dataIndex: "rank", width: 56, align: "right",
+      render: (r: number) => {
+        if (!r) return <Typography.Text type="secondary">—</Typography.Text>;
+        const color = r === 1 ? "#f5c518" : r === 2 ? token.colorTextSecondary : r === 3 ? "#d98555" : undefined;
+        return <span style={{ color, fontWeight: r <= 3 ? 700 : 400 }}>{r}</span>;
+      },
+    },
+    {
+      title: "分支 / 提交", dataIndex: "branch", ellipsis: true,
+      render: (_: unknown, e) => (
+        <Space size={8}>
+          <Tooltip title={e.branch}><span>{e.branch}</span></Tooltip>
+          <Typography.Text code style={{ fontSize: 11.5 }}>{e.sha.slice(0, 8)}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "状态", width: 96,
+      render: (_: unknown, e) => {
+        if (!e.tested) return <Tag variant="filled">未测试</Tag>;
+        const m = STATUS_TAG[e.status ?? ""] ?? { label: e.status ?? "-", color: "default" };
+        return <Tag color={m.color} variant="filled">{m.label}</Tag>;
+      },
+    },
+    { title: "测试时间", width: 128, render: (_: unknown, e) => fmtTime(e.finishedAt ?? e.startedAt ?? null) },
+    { title: "PyCircuit cycle/s", dataIndex: "pycircuit", width: 150, align: "right", render: (v?: number | null) => (v != null ? fmtNum(v) : "—") },
+    { title: "Verilator cycle/s", dataIndex: "verilator", width: 148, align: "right", render: (v?: number | null) => (v != null ? fmtNum(v) : "—") },
+    {
+      title: "P/V ratio", dataIndex: "ratio", width: 104, align: "right",
+      render: (v?: number | null) => (v != null
+        ? <Typography.Text strong style={{ color: token.colorPrimary }}>{v.toFixed(3)}</Typography.Text>
+        : "—"),
+    },
+    { title: "MATCH", width: 90, align: "right", render: (_: unknown, e) => (e.rowN ? `${e.matchN}/${e.rowN}` : "—") },
+    {
+      title: "操作", width: 82, align: "center",
+      render: (_: unknown, e) => (e.taskDir
+        ? <Button size="small" onClick={() => props.onOpenTask(e.taskDir!)}>查看</Button>
+        : <Typography.Text type="secondary">—</Typography.Text>),
+    },
+  ];
 
   return (
-    <div className="dashboard">
-      <div className="dashcard">
-        <div className="cardtitle">
-          各分支最佳性能
-          <span className="histcount">
+    <Card
+      size="small"
+      title={
+        <Space size={10} wrap>
+          <span>各分支最佳性能</span>
+          <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
             {data ? `${data.total} 个远端分支 · ${data.tested} 个已测` : "加载中…"}
-          </span>
-          <span className="dim">按 P/V ratio（PyCircuit ÷ Verilator）从大到小；数字取该分支当前 head commit 最新一次已完成测试的算术平均</span>
-          <span className="filters">
-            <span className="searchwrap">
-              <input
-                className="branchq"
-                placeholder="按分支 / SHA 过滤…"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              />
-              {filter && (
-                <button className="searchclear" title="清空搜索" onClick={() => setFilter("")}>×</button>
-              )}
-            </span>
-          </span>
-        </div>
-        {error ? (
-          <div className="errline">读取机器人状态库失败：{error}</div>
-        ) : null}
-        <div className="tablewrap histtable">
-          <table className="tasktable">
-            <thead>
-              <tr>
-                <th className="rankcol">#</th>
-                <th>分支 / 提交</th>
-                <th>状态</th>
-                <th>测试时间</th>
-                <th className="num">PyCircuit cycle/s</th>
-                <th className="num">Verilator cycle/s</th>
-                <th className="num">P/V ratio</th>
-                <th className="num">MATCH</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tested.map((e, i) => {
-                const st = STATUS_LABEL[e.status ?? ""] ?? { label: e.status ?? "-", cls: "st-interrupted" };
-                return (
-                  <tr key={e.branch + e.sha} className={"bestrow top" + Math.min(i + 1, 4)}>
-                    <td className={"rankcol r" + (i + 1)}>{i + 1}</td>
-                    <td className="branch" title={e.branch}>{e.branch}
-                      <span className="sha8"> {e.sha.slice(0, 8)}</span>
-                    </td>
-                    <td><span className={"badge " + st.cls}>{st.label}</span></td>
-                    <td className="ts">{fmtTime(e.finishedAt ?? e.startedAt ?? null)}</td>
-                    <td className="num">{fmtNum(e.pycircuit)}</td>
-                    <td className="num">{fmtNum(e.verilator)}</td>
-                    <td className="num ratio">{e.ratio != null ? e.ratio.toFixed(3) : "—"}</td>
-                    <td className="num">{e.rowN ? `${e.matchN}/${e.rowN}` : "—"}</td>
-                    <td>
-                      {e.taskDir
-                        ? <button className="mini" onClick={() => props.onOpenTask(e.taskDir!)}>查看</button>
-                        : <span className="dim">—</span>}
-                    </td>
-                  </tr>
-                );
-              })}
-              {tested.length === 0 && !error && (
-                <tr><td colSpan={9} className="dim" style={{ textAlign: "center", padding: 18 }}>没有匹配的分支</td></tr>
-              )}
-              {untested.length > 0 && (
-                <tr className="untested-head">
-                  <td colSpan={9} className="dim">未测试（当前 head 还没有已完成测试）· {untested.length} 个</td>
-                </tr>
-              )}
-              {untested.map((e) => (
-                <tr key={e.branch + e.sha} className="isuntested">
-                  <td className="rankcol dim">—</td>
-                  <td className="branch dim">{e.branch}<span className="sha8"> {e.sha.slice(0, 8)}</span></td>
-                  <td><span className="badge st-interrupted">未测试</span></td>
-                  <td className="ts dim">—</td>
-                  <td className="num dim">—</td>
-                  <td className="num dim">—</td>
-                  <td className="num dim">—</td>
-                  <td className="num dim">—</td>
-                  <td className="dim">—</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="histfoot">
-          <span className="dim">
-            {data ? `共 ${rows.length} 个分支 · 已测 ${tested.length} · 未测 ${untested.length} · 15s 自动刷新` : ""}
-            {data?.entries?.[0]?.ratio != null ? ` · 当前最佳 ${data.entries[0].branch} (P/V ${data.entries[0].ratio.toFixed(3)}, ${fmtDur(data.entries[0].totalSeconds ?? null)})` : ""}
-          </span>
-        </div>
-      </div>
-    </div>
+          </Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+            按 P/V ratio（PyCircuit ÷ Verilator）降序；取各分支当前 head commit 最新一次已完成测试的算术平均
+          </Typography.Text>
+        </Space>
+      }
+      extra={
+        <Input
+          size="small" allowClear placeholder="按分支 / SHA 过滤…" style={{ width: 240 }}
+          value={filter} onChange={(e) => setFilter(e.target.value)}
+        />
+      }
+    >
+      {error && <Alert type="error" showIcon message="读取机器人状态库失败" description={error} style={{ marginBottom: 12 }} />}
+      <Table
+        size="small"
+        rowKey={(e) => e.branch + e.sha}
+        columns={columns}
+        dataSource={rows}
+        pagination={{
+          pageSize: 20, size: "small", position: ["bottomRight"],
+          showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100],
+          showTotal: (t) => `共 ${t} 个分支`,
+        }}
+        locale={{ emptyText: "没有匹配的分支" }}
+        onRow={(e) => ({ onClick: () => { if (e.taskDir) props.onOpenTask(e.taskDir); }, style: { cursor: e.taskDir ? "pointer" : "default" } })}
+        rowClassName={(e) => (e.rank === 1 ? "row-top1" : e.tested ? "" : "row-untested")}
+      />
+    </Card>
   );
 }

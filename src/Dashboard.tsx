@@ -1,3 +1,8 @@
+import {
+  Alert, AutoComplete, Button, Card, Descriptions, Empty, Input, Pagination, Select, Space,
+  Table, Tag, Tooltip, Typography, theme,
+} from "antd";
+import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   displayStatus, fetchHealth, fetchLogPage, fetchQueue, fetchTask, fetchTasks,
@@ -5,73 +10,62 @@ import {
   type DisplayStatus, type Health, type LogPage, type Queue, type TaskDetail, type TaskSummary,
 } from "./api";
 
-const STATUS_META: Record<DisplayStatus, { label: string; cls: string }> = {
-  pass: { label: "PASS", cls: "st-pass" },
-  partial: { label: "PARTIAL", cls: "st-partial" },
-  fail: { label: "FAIL", cls: "st-fail" },
-  timeout: { label: "TIMEOUT", cls: "st-timeout" },
-  running: { label: "运行中", cls: "st-running" },
-  interrupted: { label: "已中断", cls: "st-interrupted" },
-  queued: { label: "排队", cls: "st-queued" },
+const STATUS_META: Record<DisplayStatus, { label: string; color: string }> = {
+  pass: { label: "PASS", color: "success" },
+  partial: { label: "PARTIAL", color: "warning" },
+  fail: { label: "FAIL", color: "error" },
+  timeout: { label: "TIMEOUT", color: "purple" },
+  running: { label: "运行中", color: "processing" },
+  queued: { label: "排队", color: "gold" },
+  interrupted: { label: "已中断", color: "default" },
 };
 
-function StatusBadge({ s }: { s: DisplayStatus }) {
+const StatusTag = ({ s }: { s: DisplayStatus }) => {
   const m = STATUS_META[s] ?? STATUS_META.interrupted;
-  return <span className={"badge " + m.cls}>{m.label}</span>;
-}
+  return <Tag color={m.color} variant="filled" style={{ marginInlineEnd: 0 }}>{m.label}</Tag>;
+};
 
 function relTime(iso: string | null | undefined): string {
   if (!iso) return "";
-  const d = new Date(iso).getTime();
-  if (isNaN(d)) return "";
-  const diff = Math.max(0, Date.now() - d) / 1000;
-  if (diff < 60) return Math.floor(diff) + " 秒前";
-  if (diff < 3600) return Math.floor(diff / 60) + " 分钟前";
-  if (diff < 86400) return Math.floor(diff / 3600) + " 小时前";
-  return Math.floor(diff / 86400) + " 天前";
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "";
+  const d = Math.max(0, Date.now() - t) / 1000;
+  if (d < 60) return Math.floor(d) + " 秒前";
+  if (d < 3600) return Math.floor(d / 60) + " 分钟前";
+  if (d < 86400) return Math.floor(d / 3600) + " 小时前";
+  return Math.floor(d / 86400) + " 天前";
 }
 
 interface SparkPoint { x: number; y: number; name: string; status: string; ts: string | null }
 
 function Sparkline(props: {
-  points: SparkPoint[]; unit: string; title: string;
-  height?: number; digits?: number;
+  points: SparkPoint[]; unit: string; title: string; color: string; digits?: number;
   selected: string | null; onSelect: (name: string) => void;
 }) {
-  const { points, unit, title, height = 96, digits = 3, selected, onSelect } = props;
-  const W = 1000; // viewBox width; scales responsively
-  const H = height;
-  const padY = 14;
-  if (points.length === 0) return <div className="spark empty">{title}：暂无数据</div>;
-  const xs = points.map((p) => p.x);
-  const ys = points.map((p) => p.y);
+  const { points, unit, title, color, digits = 3, selected, onSelect } = props;
+  const W = 800, H = 92, padY = 12;
+  if (!points.length) return null;
+  const xs = points.map((p) => p.x), ys = points.map((p) => p.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const spanX = maxX - minX || 1;
-  const spanY = maxY - minY || maxY || 1;
-  const px = (x: number) => 8 + ((x - minX) / spanX) * (W - 16);
-  const py = (y: number) => H - padY - ((y - minY) / spanY) * (H - padY * 2);
-  const path = points.map((p, i) => (i ? "L" : "M") + px(p.x).toFixed(1) + " " + py(p.y).toFixed(1)).join(" ");
+  const sx = (maxX - minX) || 1, sy = (maxY - minY) || 1;
+  const px = (x: number) => 8 + ((x - minX) / sx) * (W - 16);
+  const py = (y: number) => H - padY - ((y - minY) / sy) * (H - padY * 2);
+  const d = points.map((p, i) => (i ? "L" : "M") + px(p.x).toFixed(1) + " " + py(p.y).toFixed(1)).join(" ");
   return (
-    <div className="spark">
-      <div className="sparkhead">
+    <div style={{ flex: 1, minWidth: 320 }}>
+      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 2 }}>
         {title}
-        <span className="sparkrange">
-          min {fmtNum(minY, digits)} · max {fmtNum(maxY, digits)} · 最新 <b>{fmtNum(points[points.length - 1].y, digits)}</b> {unit}
+        <span style={{ float: "right" }}>
+          {fmtNum(minY, digits)} ~ {fmtNum(maxY, digits)} {unit}
         </span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="sparksvg">
-        <path d={path} fill="none" stroke="#4dd0e1" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 92 }}>
+        <path d={d} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
         {points.map((p, i) => (
-          <circle
-            key={p.name + i}
-            cx={px(p.x)}
-            cy={py(p.y)}
-            r={selected === p.name ? 5 : 3.5}
-            vectorEffect="non-scaling-stroke"
-            className={"sparkdot " + (p.status === "pass" ? "ok" : "bad") + (selected === p.name ? " sel" : "")}
-            onClick={() => onSelect(p.name)}
-          >
+          <circle key={p.name + i} cx={px(p.x)} cy={py(p.y)} r={selected === p.name ? 5 : 3}
+            fill={p.status === "pass" ? color : "#e57373"} style={{ cursor: "pointer" }}
+            onClick={() => onSelect(p.name)}>
             <title>{(p.ts ?? "") + "\n" + fmtNum(p.y, digits) + " " + unit + "\n" + p.name}</title>
           </circle>
         ))}
@@ -82,50 +76,34 @@ function Sparkline(props: {
 
 export default function Dashboard(props: { onOpenGraph: (task?: string) => void; openTask?: string | null }) {
   const { onOpenGraph, openTask } = props;
+  const { token } = theme.useToken();
+
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [queue, setQueue] = useState<Queue | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<TaskDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [logPage, setLogPage] = useState<LogPage | null>(null);
+  const [logPageNo, setLogPageNo] = useState(1);
   const [logPageSize, setLogPageSize] = useState(100);
-  const [logLoading, setLogLoading] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [branchFilter, setBranchFilter] = useState("");
   const [histPage, setHistPage] = useState(1);
   const [histPageSize, setHistPageSize] = useState(10);
-  // 手动提测
   const [submitText, setSubmitText] = useState("");
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [branches, setBranches] = useState<{ branch: string; sha: string }[]>([]);
-  const [sugOpen, setSugOpen] = useState(false);
-  const [sugIndex, setSugIndex] = useState(-1);
-  const logStateRef = useRef<LogPage | null>(null);
-  logStateRef.current = logPage;
-  const logPageSizeRef = useRef(100);
-  logPageSizeRef.current = logPageSize;
-  const detailRef = useRef<HTMLDivElement>(null);
+  const [branches, setBranches] = useState<{ value: string; sha: string }[]>([]);
   const autoPickedRef = useRef(false);
+  const logPageRef = useRef<LogPage | null>(null);
+  logPageRef.current = logPage;
 
-  // 分支补全列表（机器人 remote_refs）
-  const loadRefs = useCallback(async () => {
-    try {
-      const r = await fetch("/api/autoperf/refs");
-      if (!r.ok) return;
-      const d = await r.json();
-      if (d?.available) setBranches(d.branches ?? []);
-    } catch { /* ignore */ }
-  }, []);
-  useEffect(() => { void loadRefs(); }, [loadRefs]);
-
-  // ---- polling ----
   const refresh = useCallback(async () => {
     const [t, h] = await Promise.all([fetchTasks(), fetchHealth()]);
     if (t) setTasks(t.tasks);
     setHealth(h);
   }, []);
+
   useEffect(() => {
     void refresh();
     const t1 = setInterval(() => void refresh(), 10000);
@@ -135,35 +113,111 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
     return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3); };
   }, [refresh]);
 
-  // 最新一个无 result.json 的任务 = 机器人在跑的那个（串行执行）
-  const newestNoResult = useMemo(() => (tasks.find((t) => !t.hasResult)?.name ?? null), [tasks]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/autoperf/refs");
+        if (!r.ok) return;
+        const d = await r.json();
+        if (d?.available) {
+          setBranches((d.branches as { branch: string; sha: string }[]).map((b) => ({ value: b.branch, sha: b.sha })));
+        }
+      } catch { /* ignore */ }
+    })();
+  }, []);
+
+  const newestNoResult = useMemo(() => tasks.find((t) => !t.hasResult)?.name ?? null, [tasks]);
   const runningTask = useMemo(
     () => tasks.find((t) => t.name === newestNoResult && displayStatus(t, health, newestNoResult) === "running") ?? null,
     [tasks, health, newestNoResult],
   );
 
-  // 从「最佳」页跳转进来：选中指定任务
-  useEffect(() => {
-    if (openTask) setSelected(openTask);
-  }, [openTask]);
+  const tableRows = useMemo(() => {
+    const queued: TaskSummary[] = (queue?.available ? queue.rows ?? [] : [])
+      .filter((r) => r.status === "pending")
+      .map((r) => ({
+        name: "queue:" + r.delivery_id, mtime: Date.parse(r.created_at) || 0, ts: r.created_at,
+        files: [], hasResult: false, branch: r.branch, sha: r.sha, queued: true,
+      }));
+    const bySha = new Map<string, { branch: string; sha: string }>();
+    for (const r of queue?.rows ?? []) bySha.set((r.sha ?? "").slice(0, 8), { branch: r.branch, sha: r.sha });
+    const started = tasks.map((t) => {
+      const hit = bySha.get(t.name.slice(-8));
+      return { ...t, queued: false, branch: t.branch ?? hit?.branch, sha: t.sha ?? hit?.sha };
+    });
+    return [...queued, ...started];
+  }, [tasks, queue]);
 
-  // 首屏自动选中正在运行的任务：打开页面直接看到实时日志，不用先点
+  const dataSource = useMemo(() => {
+    const q = branchFilter.trim().toLowerCase();
+    const tms = (t: TaskSummary) => (t.ts ? Date.parse(t.ts) : t.mtime) || 0;
+    const group = (st: string) => (st === "queued" ? 0 : st === "running" ? 1 : 2);
+    return tableRows
+      .map((t) => ({ ...t, st: (t.queued ? "queued" : displayStatus(t, health, newestNoResult)) as DisplayStatus }))
+      .filter((t) => {
+        if (statusFilter !== "all" && t.st !== statusFilter) return false;
+        if (!q) return true;
+        return ((t.branch ?? "") + " " + t.name + " " + (t.sha ?? "")).toLowerCase().includes(q);
+      })
+      .sort((a, b) => group(a.st) - group(b.st) || tms(b) - tms(a));
+  }, [tableRows, health, newestNoResult, statusFilter, branchFilter]);
+
+  const loadDetail = useCallback(async (name: string) => {
+    const d = await fetchTask(name);
+    setDetail(d);
+  }, []);
+
+  useEffect(() => {
+    if (!selected) { setDetail(null); setLogPage(null); return; }
+    void loadDetail(selected);
+    const running = tasks.find((t) => t.name === selected && !t.hasResult);
+    const t = setInterval(() => { if (running) void loadDetail(selected); }, running ? 5000 : 15000);
+    return () => clearInterval(t);
+  }, [selected, loadDetail]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (autoPickedRef.current || selected || !runningTask) return;
     autoPickedRef.current = true;
     setSelected(runningTask.name);
   }, [runningTask, selected]);
 
-  // 分支建议：子串匹配分支名或 SHA 前缀，最多 8 条
-  const suggestions = useMemo(() => {
-    const q = submitText.trim().toLowerCase();
-    const list = branches.filter(
-      (b) => !q || b.branch.toLowerCase().includes(q) || b.sha.toLowerCase().startsWith(q),
-    );
-    return list.slice(0, 8);
-  }, [branches, submitText]);
+  useEffect(() => {
+    if (openTask) setSelected(openTask);
+  }, [openTask]);
 
-  // ---- 手动提测：转发机器人 Local API ----
+  const loadLog = useCallback(async (name: string, page: number | "last", size: number) => {
+    const d = await fetchLogPage(name, "execution.log", page, size);
+    setLogPage(d);
+    if (d) setLogPageNo(d.page);
+  }, []);
+
+  useEffect(() => {
+    if (!selected) { setLogPage(null); return; }
+    void loadLog(selected, 1, logPageSize);
+  }, [selected, logPageSize, loadLog]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selRunning = !!(detail && !detail.result);
+  useEffect(() => {
+    if (!selected || !selRunning) return;
+    const t = setInterval(() => {
+      const st = logPageRef.current;
+      if (!st || st.page >= st.totalPages) void loadLog(selected, "last", logPageSize);
+    }, 5000);
+    return () => clearInterval(t);
+  }, [selected, selRunning, loadLog, logPageSize]);
+
+  const trend = useMemo(() => {
+    if (!detail?.result) return { pv: [] as SparkPoint[], cps: [] as SparkPoint[] };
+    const branch = detail.result.branch;
+    const same = tasks
+      .filter((t) => t.hasResult && t.branch === branch && (t.gmPV != null || t.gmCps != null) && t.ts)
+      .sort((a, b) => (a.ts! < b.ts! ? -1 : 1)).slice(-40);
+    return {
+      pv: same.filter((t) => t.gmPV != null).map((t) => ({ x: Date.parse(t.ts!), y: t.gmPV!, name: t.name, status: t.status ?? "", ts: t.ts })),
+      cps: same.filter((t) => t.gmCps != null).map((t) => ({ x: Date.parse(t.ts!), y: t.gmCps!, name: t.name, status: t.status ?? "", ts: t.ts })),
+    };
+  }, [detail, tasks]);
+
   const doSubmit = useCallback(async () => {
     const commit = submitText.trim();
     if (!commit || submitBusy) return;
@@ -171,8 +225,7 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
     setSubmitMsg(null);
     try {
       const r = await fetch("/api/autoperf/submit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ commit }),
       });
       const d = await r.json();
@@ -183,7 +236,6 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
         });
         setSubmitText("");
         void refresh();
-        void loadRefs();
         void fetchQueue().then((q) => q && setQueue(q));
       } else {
         setSubmitMsg({ ok: false, text: d?.error ?? "提交失败" });
@@ -193,468 +245,263 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
     } finally {
       setSubmitBusy(false);
     }
-  }, [submitText, submitBusy, refresh, loadRefs]);
+  }, [submitText, submitBusy, refresh]);
 
-  // ---- detail loading (auto-refresh while running) ----
-  const loadDetail = useCallback(async (name: string) => {
-    setDetailLoading(true);
-    const d = await fetchTask(name);
-    setDetail(d);
-    setDetailLoading(false);
-  }, []);
-  useEffect(() => {
-    if (!selected) { setDetail(null); setLogPage(null); return; }
-    void loadDetail(selected);
-    const running = tasks.find((t) => t.name === selected && !t.hasResult);
-    const t = setInterval(() => {
-      if (running) void loadDetail(selected);
-    }, running ? 5000 : 15000);
-    return () => clearInterval(t);
-  }, [selected, loadDetail]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 过滤条件或每页条数变化后回到第 1 页
-  useEffect(() => { setHistPage(1); }, [statusFilter, branchFilter, histPageSize]);
-
-  // 选中任务后把详情面板滚进视野（详情在历史表上方，选中即见）
-  useEffect(() => {
-    if (!selected) return;
-    const t = setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
-    return () => clearTimeout(t);
-  }, [selected]);
-
-  // ---- execution.log 分页查看（整页翻页，无内部滚动条） ----
-  const loadLogPage = useCallback(async (name: string, page: number | "last", size: number) => {
-    setLogLoading(true);
-    const d = await fetchLogPage(name, "execution.log", page, size);
-    setLogPage(d);
-    setLogLoading(false);
-  }, []);
-  // 切任务 / 改每页行数：回到末页（最新内容）
-  useEffect(() => {
-    if (!selected) { setLogPage(null); return; }
-    void loadLogPage(selected, "last", logPageSize);
-  }, [selected, logPageSize, loadLogPage]);
-  // 运行中任务：停在末页时 5s 跟随最新；翻到历史页则不打扰
-  const selRunning = !!(detail && !detail.result);
-  useEffect(() => {
-    if (!selected || !selRunning) return;
-    const t = setInterval(() => {
-      const st = logStateRef.current;
-      if (!st || st.page >= st.totalPages) void loadLogPage(selected, "last", logPageSizeRef.current);
-    }, 5000);
-    return () => clearInterval(t);
-  }, [selected, selRunning, loadLogPage]);
-
-  // ---- derived table ----
-  // 排队中（尚未产生 task 目录）的任务并进表格：按入队时间倒序 → 最后入队的排第一行
-  const tableRows = useMemo(() => {
-    const queued: TaskSummary[] = (queue?.available ? queue.rows ?? [] : [])
-      .filter((r) => r.status === "pending")
-      .map((r) => ({
-        name: "queue:" + r.delivery_id,
-        mtime: Date.parse(r.created_at) || 0,
-        ts: r.created_at,
-        files: [],
-        hasResult: false,
-        branch: r.branch,
-        sha: r.sha,
-        queued: true,
-      }));
-    // 运行中的任务还没有 result.json，分支/SHA 从目录名反推不准；
-    // 用状态库里的同一任务（按名字尾部的 sha8 匹配）补正
-    const bySha = new Map<string, { branch: string; sha: string }>();
-    for (const r of queue?.rows ?? []) bySha.set((r.sha ?? "").slice(0, 8), { branch: r.branch, sha: r.sha });
-    const started = tasks.map((t) => {
-      const sha8 = t.name.slice(-8);
-      const hit = bySha.get(sha8);
-      return {
-        ...t,
-        queued: false,
-        branch: t.branch ?? hit?.branch,
-        sha: t.sha ?? hit?.sha,
-      };
-    });
-    return [...queued, ...started];
-  }, [tasks, queue]);
-
-  const rows = useMemo(() => {
-    const q = branchFilter.trim().toLowerCase();
-    const tms = (t: TaskSummary) => (t.ts ? Date.parse(t.ts) : t.mtime) || 0;
-    // 展示顺序：1) 排队 2) 运行中 3) 已结束；组内按时间倒序（最后入队/最新的在上）
-    const group = (st: string) => (st === "queued" ? 0 : st === "running" ? 1 : 2);
-    return tableRows
-      .map((t) => ({ t, st: t.queued ? "queued" : displayStatus(t, health, newestNoResult) }))
-      .filter(({ t, st }) => {
-        if (statusFilter !== "all" && st !== statusFilter) return false;
-        if (q) {
-          const hay = ((t.branch ?? "") + " " + t.name + " " + (t.sha ?? "")).toLowerCase();
-          if (!hay.includes(q)) return false;
-        }
-        return true;
-      })
-      .sort((a, b) => group(a.st) - group(b.st) || tms(b.t) - tms(a.t))
-      .map(({ t }) => t);
-  }, [tableRows, health, statusFilter, branchFilter, newestNoResult]);
-
-  const histPages = Math.max(1, Math.ceil(rows.length / histPageSize));
-  const histPageSafe = Math.min(Math.max(histPage, 1), histPages);
-  const pageRows = rows.slice((histPageSafe - 1) * histPageSize, histPageSafe * histPageSize);
-  const histFrom = rows.length ? (histPageSafe - 1) * histPageSize + 1 : 0;
-  // 页码序列：首尾 + 当前±1，间隔处用省略号，形状形如 < 1 2 3 4 … 12 >
-  const pageButtons = useMemo(() => {
-    const keep = new Set<number>();
-    for (const n of [1, histPages, histPageSafe - 1, histPageSafe, histPageSafe + 1]) {
-      if (n >= 1 && n <= histPages) keep.add(n);
-    }
-    if (histPageSafe <= 3) for (let n = 2; n <= Math.min(5, histPages); n++) keep.add(n);
-    if (histPageSafe >= histPages - 2) for (let n = Math.max(1, histPages - 4); n < histPages; n++) keep.add(n);
-    const sorted = [...keep].sort((a, b) => a - b);
-    const out: (number | "dots")[] = [];
-    sorted.forEach((n, i) => {
-      if (i > 0 && n - sorted[i - 1] > 1) out.push("dots");
-      out.push(n);
-    });
-    return out;
-  }, [histPageSafe, histPages]);
-  const histTo = Math.min(histPageSafe * histPageSize, rows.length);
-
-  // 同分支历史趋势（当前选中任务）
-  const trend = useMemo(() => {
-    if (!detail?.result) return { pv: [] as SparkPoint[], cps: [] as SparkPoint[] };
-    const branch = detail.result.branch;
-    const same = tasks
-      .filter((t) => t.hasResult && t.branch === branch && (t.gmPV != null || t.gmCps != null) && t.ts)
-      .sort((a, b) => (a.ts! < b.ts! ? -1 : 1))
-      .slice(-40);
-    return {
-      pv: same.filter((t) => t.gmPV != null).map((t) => ({ x: new Date(t.ts!).getTime(), y: t.gmPV!, name: t.name, status: t.status ?? "", ts: t.ts })),
-      cps: same.filter((t) => t.gmCps != null).map((t) => ({ x: new Date(t.ts!).getTime(), y: t.gmCps!, name: t.name, status: t.status ?? "", ts: t.ts })),
-    };
-  }, [detail, tasks]);
+  const columns: ColumnsType<TaskSummary & { st: DisplayStatus }> = [
+    { title: "状态", dataIndex: "st", width: 92, render: (st: DisplayStatus) => <StatusTag s={st} /> },
+    {
+      title: "时间", dataIndex: "ts", width: 128,
+      render: (_: unknown, r) => <span title={r.name}>{fmtTime(r.ts, r.mtime)}</span>,
+    },
+    {
+      title: "分支", dataIndex: "branch", ellipsis: true,
+      render: (_: unknown, r) => (
+        <Tooltip title={r.branch ?? r.name}>{r.branch ?? (r.name.split("-").slice(2, -1).join("-") || "—")}</Tooltip>
+      ),
+    },
+    {
+      title: "SHA", dataIndex: "sha", width: 92,
+      render: (sha: string) => <Typography.Text code style={{ fontSize: 12 }}>{(sha || "").slice(0, 8) || "—"}</Typography.Text>,
+    },
+    { title: "P/V 几何均值", dataIndex: "gmPV", width: 116, align: "right", render: (v?: number | null) => (v != null ? v.toFixed(3) : "—") },
+    { title: "cycle/s 几何均值", dataIndex: "gmCps", width: 132, align: "right", render: (v?: number | null) => (v != null ? fmtNum(v) : "—") },
+    {
+      title: "MATCH", width: 84, align: "right",
+      render: (_: unknown, r) => (r.hasResult ? `${r.matchN ?? 0}/${r.rowN ?? 0}` : "—"),
+    },
+    { title: "总时长", width: 88, align: "right", render: (_: unknown, r) => fmtDur(r.totalSeconds ?? null) },
+    {
+      title: "IR", width: 76, align: "center",
+      render: (_: unknown, r) => (r.files.length > 0 && !r.queued
+        ? <Button size="small" onClick={(e) => { e.stopPropagation(); onOpenGraph(r.name); }}>图谱</Button>
+        : <span style={{ opacity: 0.4 }}>—</span>),
+    },
+  ];
 
   const counts = health?.counts;
   const botUp = health?.ok === true;
-
-  const selTask = tasks.find((t) => t.name === selected) ?? null;
-  const selStatus = selTask ? displayStatus(selTask, health, newestNoResult) : null;
+  const pageRows = dataSource.slice((histPage - 1) * histPageSize, histPage * histPageSize);
+  const selStatus = selected ? displayStatus(tasks.find((t) => t.name === selected) ?? ({} as TaskSummary), health, newestNoResult) : null;
 
   return (
-    <div className="dashboard">
-      {/* ============ 历史列表 ============ */}
-      <div className="dashcard">
-        <div className="cardtitle">
-          测试历史
-          <span className="histcount">{rows.length} 个任务 · 10s 刷新</span>
-          <span className={"botdot " + (botUp ? "up" : "down")} title={health?.error ?? ""}>
-            {botUp ? "在线 :8790" : "不可达"}
-          </span>
-          {counts ? (
-            <span className="histchips">
-              <span className="chip st-running">运行 {counts.running ?? 0}</span>
-              <span className="chip st-interrupted">排队 {counts.pending ?? 0}</span>
-              <span className="chip st-pass">PASS {counts.pass ?? 0}</span>
-              <span className="chip st-partial">PARTIAL {counts.partial ?? 0}</span>
-              <span className="chip st-fail">FAIL {counts.fail ?? 0}</span>
-              <span className="chip st-timeout">TIMEOUT {counts.timeout ?? 0}</span>
-            </span>
-          ) : null}
-          <span className="filters">
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="all">全部状态</option>
-              <option value="pass">PASS</option>
-              <option value="partial">PARTIAL</option>
-              <option value="fail">FAIL</option>
-              <option value="timeout">TIMEOUT</option>
-              <option value="running">运行中</option>
-              <option value="queued">排队中</option>
-              <option value="interrupted">已中断</option>
-            </select>
-            <span className="searchwrap">
-              <input
-                className="branchq"
-                placeholder="按分支 / SHA / 目录过滤…"
-                value={branchFilter}
-                onChange={(e) => setBranchFilter(e.target.value)}
-              />
-              {branchFilter && (
-                <button className="searchclear" title="清空搜索" onClick={() => setBranchFilter("")}>×</button>
-              )}
-            </span>
-          </span>
-        </div>
-        <div className="submitbar">
-          <span className="dim">手动提测</span>
-          <span className="submitwrap">
-            <span className="searchwrap">
-              <input
-                className="submitq"
-                placeholder="分支名，或 ≥7 位 commit SHA（回车提交）"
-                value={submitText}
-                onChange={(e) => {
-                  setSubmitText(e.target.value);
-                  setSubmitMsg(null);
-                  setSugOpen(true);
-                  setSugIndex(-1);
-                }}
-                onFocus={() => { setSugOpen(true); setSugIndex(-1); }}
-                onBlur={() => setTimeout(() => setSugOpen(false), 120)}
-                onKeyDown={(e) => {
-                  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                    e.preventDefault();
-                    if (!sugOpen) { setSugOpen(true); return; }
-                    const n = suggestions.length;
-                    if (!n) return;
-                    setSugIndex((i) => {
-                      const next = e.key === "ArrowDown" ? i + 1 : i - 1;
-                      return next < 0 ? n - 1 : next >= n ? 0 : next;
-                    });
-                    return;
-                  }
-                  if (e.key === "Escape") { setSugOpen(false); setSugIndex(-1); return; }
-                  if (e.key === "Enter") {
-                    if (sugOpen && sugIndex >= 0 && suggestions[sugIndex]) {
-                      e.preventDefault();
-                      setSubmitText(suggestions[sugIndex].branch);
-                      setSugOpen(false);
-                      setSugIndex(-1);
-                      return;
-                    }
-                    void doSubmit();
-                  }
-                }}
-              />
-              {submitText && (
-                <button className="searchclear" title="清空" onClick={() => { setSubmitText(""); setSubmitMsg(null); }}>×</button>
-              )}
-            </span>
-            {sugOpen && suggestions.length > 0 && (
-              <div className="suglist">
-                {suggestions.map((b, i) => (
-                  <div
-                    key={b.branch}
-                    className={"sugitem" + (i === sugIndex ? " on" : "")}
-                    onMouseEnter={() => setSugIndex(i)}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      setSubmitText(b.branch);
-                      setSugOpen(false);
-                      setSugIndex(-1);
-                    }}
-                    title={b.branch}
-                  >
-                    <span className="sugname">{b.branch}</span>
-                    <span className="sugsha">{b.sha.slice(0, 8)}</span>
-                  </div>
-                ))}
-              </div>
+    <Space orientation="vertical" size={14} style={{ width: "100%" }}>
+      <Card
+        size="small"
+        title={
+          <Space size={10} wrap>
+            <span>测试历史</span>
+            <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+              {dataSource.length} 个任务 · 10s 自动刷新
+            </Typography.Text>
+            <Tag color={botUp ? "green" : "red"} variant="filled">{botUp ? "在线 :8790" : "不可达"}</Tag>
+            {counts && (
+              <Space size={[6, 4]} wrap>
+                <Tag color="processing" variant="filled">运行 {counts.running ?? 0}</Tag>
+                <Tag color="gold" variant="filled">排队 {counts.pending ?? 0}</Tag>
+                <Tag color="green" variant="filled">PASS {counts.pass ?? 0}</Tag>
+                <Tag color="orange" variant="filled">PARTIAL {counts.partial ?? 0}</Tag>
+                <Tag color="red" variant="filled">FAIL {counts.fail ?? 0}</Tag>
+                <Tag color="purple" variant="filled">TIMEOUT {counts.timeout ?? 0}</Tag>
+              </Space>
             )}
-          </span>
-          <button className="mini" disabled={!submitText.trim() || submitBusy} onClick={() => void doSubmit()}>
-            {submitBusy ? "提交中…" : "提交测试"}
-          </button>
-          {submitMsg?.ok && <span className="submitmsg ok">✓ {submitMsg.text}</span>}
-        </div>
+          </Space>
+        }
+        extra={
+          <Space size={8}>
+            <Select
+              size="small" value={statusFilter} onChange={setStatusFilter} style={{ width: 116 }}
+              options={[
+                { value: "all", label: "全部状态" }, { value: "pass", label: "PASS" },
+                { value: "partial", label: "PARTIAL" }, { value: "fail", label: "FAIL" },
+                { value: "timeout", label: "TIMEOUT" }, { value: "running", label: "运行中" },
+                { value: "queued", label: "排队中" }, { value: "interrupted", label: "已中断" },
+              ]}
+            />
+            <Input
+              size="small" allowClear placeholder="按分支 / SHA / 目录过滤…" style={{ width: 240 }}
+              value={branchFilter}
+              onChange={(e) => { setBranchFilter(e.target.value); setHistPage(1); }}
+            />
+          </Space>
+        }
+      >
+        <Space size={8} style={{ marginBottom: 10 }} wrap>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>手动提测</Typography.Text>
+          <AutoComplete
+            value={submitText}
+            options={branches.map((b) => ({
+              value: b.value,
+              label: (
+                <Space size={8} style={{ width: "100%" }}>
+                  <span style={{ flex: 1 }}>{b.value}</span>
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>{b.sha.slice(0, 8)}</Typography.Text>
+                </Space>
+              ),
+            }))}
+            style={{ width: 380 }}
+            onChange={(v) => { setSubmitText(v); setSubmitMsg(null); }}
+            onSelect={(v) => { setSubmitText(v); setSubmitMsg(null); }}
+            filterOption={(input, option) => {
+              const s = input.toLowerCase();
+              return String(option?.value ?? "").toLowerCase().includes(s);
+            }}
+          >
+            <Input.Search
+              allowClear
+              placeholder="分支名，或 ≥7 位 commit SHA"
+              enterButton="提交测试"
+              loading={submitBusy}
+              disabled={submitBusy}
+              onSearch={() => void doSubmit()}
+            />
+          </AutoComplete>
+          {submitMsg?.ok && <Typography.Text type="success">✓ {submitMsg.text}</Typography.Text>}
+        </Space>
         {submitMsg && !submitMsg.ok && (
-          <div className="submiterr">✗ {submitMsg.text}</div>
+          <Alert type="error" showIcon style={{ marginBottom: 10, whiteSpace: "pre-wrap" }}
+            message="提交失败" description={submitMsg.text} closable onClose={() => setSubmitMsg(null)} />
         )}
         {runningTask && (
-          <div className="runline" onClick={() => setSelected(runningTask.name)}>
-            <StatusBadge s="running" />
-            <span className="runbranch">{runningTask.branch ?? runningTask.name}</span>
-            {runningTask.logSize != null && (
-              <span className="dim">日志 {fmtNum(runningTask.logSize / 1024, 1)} KB{runningTask.logMtime ? " · " + relTime(new Date(runningTask.logMtime).toISOString()) : ""}</span>
-            )}
-            <span className="dim">点击查看实时日志 →</span>
-          </div>
+          <Alert
+            type="info" showIcon style={{ marginBottom: 10 }}
+            message={
+              <Space size={10} wrap>
+                <StatusTag s="running" />
+                <Typography.Text strong>{runningTask.branch ?? runningTask.name}</Typography.Text>
+                <Typography.Text type="secondary">
+                  日志 {fmtNum((runningTask.logSize ?? 0) / 1024, 1)} KB
+                  {runningTask.logMtime ? " · " + relTime(new Date(runningTask.logMtime).toISOString()) : ""}
+                </Typography.Text>
+                <Button type="link" size="small" onClick={() => setSelected(runningTask.name)}>查看实时日志 →</Button>
+              </Space>
+            }
+          />
         )}
-        <div className="tablewrap histtable">
-          <table className="tasktable">
-            <thead>
-              <tr>
-                <th>状态</th>
-                <th>时间</th>
-                <th>分支</th>
-                <th>SHA</th>
-                <th className="num">P/V 几何均值</th>
-                <th className="num">cycle/s 几何均值</th>
-                <th className="num">MATCH</th>
-                <th className="num">总时长</th>
-                <th>IR</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageRows.map((t) => {
-                const st = t.queued ? "queued" : displayStatus(t, health, newestNoResult);
-                return (
-                  <tr
-                    key={t.name}
-                    className={(selected === t.name ? "sel " : "") + st + (t.queued ? " isqueued" : "")}
-                    title={t.queued ? "已入队，等待前面的任务跑完（尚无日志目录）" : undefined}
-                    onClick={() => { if (!t.queued) setSelected(t.name); }}
-                  >
-                    <td><StatusBadge s={st} /></td>
-                    <td className="ts" title={t.name}>{fmtTime(t.ts, t.mtime)}</td>
-                    <td className="branch" title={t.branch ?? ""}>{t.branch ?? (t.name.split("-").slice(2, -1).join("-") || "—")}</td>
-                    <td className="sha">{(t.sha ?? "").slice(0, 8) || "—"}</td>
-                    <td className="num">{t.gmPV != null ? t.gmPV.toFixed(3) : "—"}</td>
-                    <td className="num">{t.gmCps != null ? fmtNum(t.gmCps) : "—"}</td>
-                    <td className="num">{t.hasResult ? `${t.matchN ?? 0}/${t.rowN ?? 0}` : "—"}</td>
-                    <td className="num">{fmtDur(t.totalSeconds ?? null)}</td>
-                    <td className="irflag">{t.files.length > 0 ? <button className="mini" onClick={(e) => { e.stopPropagation(); onOpenGraph(t.name); }}>图谱</button> : <span className="dim">—</span>}</td>
-                  </tr>
-                );
-              })}
-              {rows.length === 0 && (
-                <tr><td colSpan={9} className="dim" style={{ textAlign: "center", padding: 18 }}>没有匹配的任务</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="histfoot">
-          <span className="dim">
-            共 {rows.length} 条 · 第 {histFrom}–{histTo} 条 · 每页
-            <select value={histPageSize} onChange={(e) => setHistPageSize(Number(e.target.value))} title="每页条数">
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-            条
-          </span>
-          <span className="pagerbar">
-            <button className="pbtn" disabled={histPageSafe <= 1} title="上一页"
-              onClick={() => setHistPage(histPageSafe - 1)}>‹</button>
-            {pageButtons.map((p, i) =>
-              p === "dots"
-                ? <span key={"d" + i} className="pdots">…</span>
-                : <button key={p} className={"pbtn" + (p === histPageSafe ? " on" : "")}
-                    onClick={() => setHistPage(p)}>{p}</button>,
-            )}
-            <button className="pbtn" disabled={histPageSafe >= histPages} title="下一页"
-              onClick={() => setHistPage(histPageSafe + 1)}>›</button>
-          </span>
-        </div>
-      </div>
-      {/* ============ 任务详情 ============ */}
+        <Table
+          size="small"
+          rowKey="name"
+          columns={columns}
+          dataSource={pageRows}
+          pagination={{
+            current: histPage,
+            pageSize: histPageSize,
+            total: dataSource.length,
+            size: "small",
+            position: ["bottomRight"],
+            showSizeChanger: true,
+            pageSizeOptions: [10, 20, 50, 100],
+            showTotal: (total, range) => `共 ${total} 条 · ${range[0]}–${range[1]}`,
+            onChange: (p, ps) => { setHistPage(ps !== histPageSize ? 1 : p); setHistPageSize(ps); },
+          }}
+          onRow={(r) => ({
+            onClick: () => { if (!r.queued) setSelected(r.name); },
+            style: { cursor: r.queued ? "default" : "pointer" },
+          })}
+          rowClassName={(r) => (r.name === selected ? "row-selected" : "")}
+          locale={{ emptyText: <Empty description="没有匹配的任务" /> }}
+          scroll={{ x: 980 }}
+        />
+      </Card>
+
       {selected && (
-        <div className="dashcard detail" ref={detailRef}>
-          <div className="cardtitle">
-            任务详情 · <code className="taskname">{selected}</code>
-            {selStatus && <StatusBadge s={selStatus} />}
-            <button className="mini" onClick={() => setSelected(null)}>关闭</button>
-          </div>
-          {detailLoading && !detail && <div className="dim">加载中…</div>}
-          {detail && (
-            <div className="detailbody">
-              <div className="meta">
-                {detail.result ? (
-                  <>
-                    <span>分支 <b>{detail.result.branch}</b></span>
-                    <span>SHA <b>{detail.result.sha.slice(0, 10)}</b></span>
-                    <span>作者 {detail.result.author}</span>
-                    {detail.result.commit_url && (
-                      <a href={detail.result.commit_url} target="_blank" rel="noreferrer">commit ↗</a>
-                    )}
-                    <span>编译 <b>{fmtDur(detail.result.compile_seconds)}</b></span>
-                    <span>矩阵 <b>{fmtDur(detail.result.matrix_seconds)}</b></span>
-                    <span>总 <b>{fmtDur(detail.result.total_seconds)}</b></span>
-                    {detail.result.area_top && <span>面积 top <b>{detail.result.area_top}</b></span>}
-                  </>
-                ) : (
-                  <span className="dim">尚未产出 result.json（运行中 / 被中断）</span>
-                )}
-                <span className="spacer" />
-                {detail.files.length > 0 && (
-                  <button className="mini" onClick={() => onOpenGraph(selected)}>在 IR 图谱中查看 {detail.files.length} 个 pass dump →</button>
-                )}
-                <button className="mini" onClick={() => void loadLogPage(selected, logPage?.page ?? "last", logPageSize)}>刷新日志</button>
-              </div>
-
-              {detail.result && detail.result.error && (
-                <div className="errline">错误：{detail.result.error}</div>
+        <Card
+          size="small"
+          title={
+            <Space size={10} wrap>
+              <span>任务详情</span>
+              <Typography.Text code style={{ fontSize: 11.5 }}>{selected}</Typography.Text>
+              {selStatus && <StatusTag s={selStatus} />}
+            </Space>
+          }
+          extra={<Button size="small" onClick={() => setSelected(null)}>关闭</Button>}
+        >
+          {detail?.result ? (
+            <>
+              <Descriptions size="small" column={4} bordered style={{ marginBottom: 12 }}
+                items={[
+                  { key: "b", label: "分支", children: detail.result.branch },
+                  { key: "s", label: "SHA", children: <Typography.Text code>{detail.result.sha.slice(0, 10)}</Typography.Text> },
+                  { key: "a", label: "作者", children: detail.result.author },
+                  {
+                    key: "c", label: "commit", children: detail.result.commit_url
+                      ? <Typography.Link href={detail.result.commit_url} target="_blank">开源仓库 ↗</Typography.Link> : "—",
+                  },
+                  { key: "compile", label: "编译", children: fmtDur(detail.result.compile_seconds) },
+                  { key: "matrix", label: "矩阵", children: fmtDur(detail.result.matrix_seconds) },
+                  { key: "total", label: "总时长", children: fmtDur(detail.result.total_seconds) },
+                  { key: "area", label: "面积 top", children: detail.result.area_top ?? "—" },
+                ]}
+              />
+              {detail.result.error && <Alert type="error" showIcon message={detail.result.error} style={{ marginBottom: 12 }} />}
+              {(trend.pv.length > 1 || trend.cps.length > 1) && (
+                <Space style={{ width: "100%", marginBottom: 12 }} size={16} wrap>
+                  <Sparkline points={trend.pv} title={`「${detail.result.branch}」P/V 走势`} unit="×" digits={3}
+                    color={token.colorPrimary} selected={selected} onSelect={setSelected} />
+                  <Sparkline points={trend.cps} title={`「${detail.result.branch}」cycle/s 走势`} unit="cyc/s" digits={0}
+                    color={token.colorSuccess} selected={selected} onSelect={setSelected} />
+                </Space>
               )}
-
-              {/* 同分支趋势 */}
-              {detail.result && (trend.pv.length > 1 || trend.cps.length > 1) && (
-                <div className="trends">
-                  <Sparkline points={trend.pv} title={`「${detail.result.branch}」P/V 几何均值走势`} unit="×" digits={3} selected={selected} onSelect={setSelected} />
-                  <Sparkline points={trend.cps} title={`「${detail.result.branch}」cycle/s 几何均值走势`} unit="cyc/s" digits={0} selected={selected} onSelect={setSelected} />
-                </div>
-              )}
-
-              {/* 逐 trace 结果 */}
-              {detail.result?.rows?.length ? (
-                <div className="tablewrap">
-                  <table className="tasktable trace">
-                    <thead>
-                      <tr>
-                        <th>trace</th>
-                        <th className="num">cycle/s</th>
-                        <th className="num">Verilator cycle/s</th>
-                        <th className="num">P/V</th>
-                        <th className="num">模拟周期</th>
-                        <th>一致性</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detail.result.rows.map((r) => (
-                        <tr key={r.trace_name} className={r.common_metrics_match ? "pass" : "fail"}>
-                          <td title={r.trace_name}>{r.trace_name.replace(/\.pto\.trace$/, "")}</td>
-                          <td className="num">{r.cycles_per_s > 0 ? fmtNum(r.cycles_per_s) : "—"}</td>
-                          <td className="num">{r.verilator_cycles_per_s > 0 ? fmtNum(r.verilator_cycles_per_s) : "—"}</td>
-                          <td className="num">{r.pycircuit_to_verilator_ratio > 0 ? r.pycircuit_to_verilator_ratio.toFixed(3) : "—"}</td>
-                          <td className="num">{fmtNum(r.simulated_cycles)}</td>
-                          <td>{r.common_metrics_match ? <span className="badge st-pass">MATCH</span> : <span className="badge st-fail" title={r.error}>{r.error ? "ERROR" : "DIFF"}</span>}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-
-              {/* execution.log 分页查看（整页翻页，无内部滚动条） */}
-              <div className="logwrap">
-                <div className="loghead">
-                  <span>execution.log{selRunning ? <span className="badge st-running" style={{ marginLeft: 8 }}>跟随最新 · 5s</span> : null}</span>
-                  <span className="dim">{logLoading ? "加载中…" : ""}</span>
-                </div>
-                {logPage ? (
-                  <>
-                    <div className="logpage">
-                      {logPage.lines.length
-                        ? logPage.lines.map((l, i) => (
-                          <div className="logline" key={i}>
-                            <span className="ln">{logPage.startLine + i}</span>
-                            <span className="lv">{l || " "}</span>
-                          </div>
-                        ))
-                        : <div className="dim" style={{ padding: "6px 0" }}>（空日志）</div>}
-                    </div>
-                    <div className="logpager">
-                      <button className="mini" disabled={logPage.page <= 1} onClick={() => void loadLogPage(selected, 1, logPageSize)}>首页</button>
-                      <button className="mini" disabled={logPage.page <= 1} onClick={() => void loadLogPage(selected, logPage.page - 1, logPageSize)}>◀ 上一页</button>
-                      <span className="dim">第 <b className="pgv">{logPage.page}</b> / {logPage.totalPages} 页</span>
-                      <button className="mini" disabled={logPage.page >= logPage.totalPages} onClick={() => void loadLogPage(selected, logPage.page + 1, logPageSize)}>下一页 ▶</button>
-                      <button className="mini" disabled={logPage.page >= logPage.totalPages} onClick={() => void loadLogPage(selected, "last", logPageSize)}>末页</button>
-                      <select value={logPageSize} onChange={(e) => setLogPageSize(Number(e.target.value))} title="每页行数">
-                        <option value={50}>50 行/页</option>
-                        <option value={100}>100 行/页</option>
-                        <option value={200}>200 行/页</option>
-                        <option value={500}>500 行/页</option>
-                      </select>
-                      <span className="dim">共 {logPage.totalLines} 行 · {fmtNum(logPage.size / 1024, 1)} KB{logPage.truncated ? " · 文件超 8MB，仅保留尾部窗口" : ""}</span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="dim">日志加载中…</div>
-                )}
-              </div>
-            </div>
+              <Table
+                size="small" rowKey="trace_name" style={{ marginBottom: 12 }}
+                pagination={{ pageSize: 10, size: "small", position: ["bottomRight"], showSizeChanger: true, pageSizeOptions: [10, 20, 34] }}
+                dataSource={detail.result.rows}
+                columns={[
+                  { title: "trace", dataIndex: "trace_name", ellipsis: true, render: (v: string) => v.replace(/\.pto\.trace$/, "") },
+                  { title: "cycle/s", dataIndex: "cycles_per_s", align: "right", width: 110, render: (v: number) => (v > 0 ? fmtNum(v) : "—") },
+                  { title: "Verilator cycle/s", dataIndex: "verilator_cycles_per_s", align: "right", width: 140, render: (v: number) => (v > 0 ? fmtNum(v) : "—") },
+                  { title: "P/V", dataIndex: "pycircuit_to_verilator_ratio", align: "right", width: 80, render: (v: number) => (v > 0 ? v.toFixed(3) : "—") },
+                  { title: "模拟周期", dataIndex: "simulated_cycles", align: "right", width: 96, render: (v: number) => fmtNum(v) },
+                  {
+                    title: "一致性", width: 96, align: "center",
+                    render: (_: unknown, r) => (r.common_metrics_match
+                      ? <Tag color="success" variant="filled">MATCH</Tag>
+                      : <Tooltip title={r.error}><Tag color="error" variant="filled">{r.error ? "ERROR" : "DIFF"}</Tag></Tooltip>),
+                  },
+                ]}
+              />
+            </>
+          ) : (
+            <Alert type="info" showIcon style={{ marginBottom: 12 }} message="尚未产出 result.json（运行中 / 被中断）" />
           )}
-        </div>
+
+          <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 6 }} wrap>
+            <Space size={8}>
+              <Typography.Text strong style={{ fontSize: 12.5 }}>execution.log</Typography.Text>
+              {selRunning && <Tag color="processing" variant="filled">跟随最新 · 5s</Tag>}
+            </Space>
+            <Space size={8}>
+              {detail && detail.files.length > 0 && (
+                <Button size="small" onClick={() => onOpenGraph(selected)}>
+                  在 IR 图谱中查看 {detail.files.length} 个 pass dump →
+                </Button>
+              )}
+              <Pagination
+                size="small"
+                current={logPageNo}
+                pageSize={logPageSize}
+                total={logPage?.totalLines ?? 0}
+                showSizeChanger
+                pageSizeOptions={[50, 100, 200, 500]}
+                showTotal={(t) => `共 ${t} 行`}
+                onChange={(p, ps) => {
+                  if (ps !== logPageSize) setLogPageSize(ps);
+                  else { setLogPageNo(p); void loadLog(selected, p, ps); }
+                }}
+              />
+            </Space>
+          </Space>
+          <div className="logpage">
+            {logPage?.lines.length
+              ? logPage.lines.map((l, i) => (
+                <div className="logline" key={i}>
+                  <span className="ln">{logPage.startLine + i}</span>
+                  <span className="lv">{l || " "}</span>
+                </div>
+              ))
+              : <Typography.Text type="secondary">（无日志）</Typography.Text>}
+          </div>
+        </Card>
       )}
-
-
-    </div>
+    </Space>
   );
 }

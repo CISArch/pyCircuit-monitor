@@ -1,7 +1,9 @@
+import { Layout, Segmented, Space, Typography, theme } from "antd";
 import { useCallback, useState } from "react";
-import Dashboard from "./Dashboard";
 import Best from "./Best";
+import Dashboard from "./Dashboard";
 import GraphView from "./GraphView";
+import { ThemeShell } from "./theme";
 
 declare const __BUILD_ID__: string;
 
@@ -15,10 +17,13 @@ function readView(): View {
   return "monitor";
 }
 
-export default function App() {
+function Shell() {
   const [view, setView] = useState<View>(readView);
-  const [graphKey, setGraphKey] = useState(() => new URLSearchParams(location.search).get("task") ?? "default");
+  const [graphKey, setGraphKey] = useState(
+    () => new URLSearchParams(location.search).get("task") ?? "default",
+  );
   const [pendingTask, setPendingTask] = useState<string | null>(null);
+  const { token } = theme.useToken();
 
   const openGraph = useCallback((task?: string) => {
     const p = new URLSearchParams();
@@ -29,41 +34,64 @@ export default function App() {
     setView("graph");
   }, []);
 
-  // 从「最佳」页点某分支 → 回监控台并选中该任务
   const openTask = useCallback((task: string) => {
     history.replaceState(null, "", location.pathname);
     setPendingTask(task);
     setView("monitor");
   }, []);
 
-  const openBest = useCallback(() => {
-    const p = new URLSearchParams();
-    p.set("view", "best");
-    history.replaceState(null, "", location.pathname + "?" + p.toString());
-    setView("best");
-  }, []);
-
-  const openMonitor = useCallback(() => {
-    history.replaceState(null, "", location.pathname);
-    setView("monitor");
+  const switchView = useCallback((v: string) => {
+    const next = v as View;
+    if (next === "monitor") {
+      history.replaceState(null, "", location.pathname);
+    } else {
+      const p = new URLSearchParams();
+      p.set("view", next);
+      history.replaceState(null, "", location.pathname + "?" + p.toString());
+    }
+    setView(next);
   }, []);
 
   return (
-    <div className="appshell">
-      <nav className="topnav">
-        <strong className="brand">pyCircuit Monitor</strong>
-        <button className={view === "monitor" ? "on" : ""} onClick={openMonitor}>监控台</button>
-        <button className={view === "best" ? "on" : ""} onClick={openBest}>最佳</button>
-        <button className={view === "graph" ? "on" : ""} onClick={() => openGraph()}>IR 图谱</button>
-        <span className="topnote">auto_perf 实时状态 · 历史与结果 · IR pass 可视化 · 构建 {__BUILD_ID__}</span>
-      </nav>
-      <div className="viewbody">
-        {view === "monitor"
-          ? <Dashboard onOpenGraph={openGraph} openTask={pendingTask} />
-          : view === "best"
-            ? <Best onOpenTask={openTask} />
-            : <GraphView key={graphKey} />}
-      </div>
-    </div>
+    <Layout style={{ minHeight: "100vh" }}>
+      <Layout.Header
+        style={{
+          display: "flex", alignItems: "center", gap: 16,
+          paddingInline: 16, height: 52, lineHeight: "52px",
+          background: token.colorBgContainer, borderBottom: `1px solid ${token.colorBorderSecondary}`,
+        }}
+      >
+        <Typography.Text strong style={{ fontSize: 15, color: token.colorPrimary }}>
+          pyCircuit Monitor
+        </Typography.Text>
+        <Segmented
+          value={view}
+          onChange={(v) => switchView(String(v))}
+          options={[
+            { label: "监控台", value: "monitor" },
+            { label: "最佳", value: "best" },
+            { label: "IR 图谱", value: "graph" },
+          ]}
+        />
+        <Space style={{ marginLeft: "auto" }} size={16}>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            auto_perf 实时状态 · 历史与结果 · IR pass 可视化 · 构建 {__BUILD_ID__}
+          </Typography.Text>
+        </Space>
+      </Layout.Header>
+      <Layout.Content style={{ padding: view === "graph" ? 0 : 14, background: token.colorBgLayout }}>
+        {view === "monitor" && <Dashboard onOpenGraph={openGraph} openTask={pendingTask} />}
+        {view === "best" && <Best onOpenTask={openTask} />}
+        {view === "graph" && <GraphView key={graphKey} />}
+      </Layout.Content>
+    </Layout>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeShell>
+      <Shell />
+    </ThemeShell>
   );
 }

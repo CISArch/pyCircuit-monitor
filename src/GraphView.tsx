@@ -646,7 +646,7 @@ export default function GraphView() {
 
   return (
     <div
-      className="app"
+      className="app irgraph"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
