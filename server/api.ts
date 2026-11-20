@@ -531,6 +531,21 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
       return
     }
 
+    // 单个任务的 pass dump 文件清单（IR 图谱页按需取，避免列表接口带 6MB）
+    if (url.pathname === '/api/autoperf/taskfiles') {
+      const name = url.searchParams.get('task') ?? ''
+      const dir = safePath(name, '')
+      if (!dir) return json(res, 403, { error: 'path escapes log root' })
+      void (async () => {
+        const st = await stat(dir).catch(() => null)
+        if (!st?.isDirectory()) return json(res, 404, { error: 'unknown task' })
+        const files: string[] = []
+        await findMlirFiles(dir, '', files)
+        json(res, 200, { files }, req)
+      })()
+      return
+    }
+
     if (url.pathname === '/api/autoperf/task') {
       const name = url.searchParams.get('name') ?? ''
       const dir = safePath(name, '')
@@ -562,7 +577,7 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
           logTail,
           logSize: lg?.size ?? 0,
           logMtime: lg?.mtimeMs ?? null,
-          files,
+          fileCount: files.length,
           entries,
         }, req)
       })()

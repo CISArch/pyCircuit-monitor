@@ -11,7 +11,8 @@ interface AutoPerfTask {
   name: string;
   mtime: number;
   hasResult: boolean;
-  files: string[];
+  files?: string[];
+  fileCount?: number;
 }
 
 const NODE_WARN_LIMIT = 3000;
@@ -171,6 +172,21 @@ export default function GraphView() {
   const [selected, setSelected] = useState<VNode | null>(null);
   const [passTag, setPassTag] = useState<string | null>(null);
   const [tasks, setTasks] = useState<AutoPerfTask[]>([]);
+  // IR 文件清单按任务懒加载（列表接口不再携带，省流量）
+  const [taskFiles, setTaskFiles] = useState<Record<string, string[]>>({});
+  const filesOf = useCallback(async (name: string): Promise<string[]> => {
+    if (taskFiles[name]) return taskFiles[name];
+    try {
+      const r = await fetch("/api/autoperf/taskfiles?task=" + encodeURIComponent(name));
+      if (!r.ok) return [];
+      const d = (await r.json()) as { files?: string[] };
+      const files = d.files ?? [];
+      setTaskFiles((prev) => ({ ...prev, [name]: files }));
+      return files;
+    } catch {
+      return [];
+    }
+  }, [taskFiles]);
   const [taskName, setTaskName] = useState<string>("");
   const [loadingMsg, setLoadingMsg] = useState<string | null>(null);
   const [irFlavor, setIrFlavor] = useState<"cpp" | "verilator">("cpp");
@@ -310,10 +326,10 @@ export default function GraphView() {
   );
 
   const taskDirs = useMemo(() => {
-    const t = tasks.find((x) => x.name === taskName);
-    if (!t) return [];
+    if (!taskName) return [];
+    const files = taskFiles[taskName] ?? tasks.find((x) => x.name === taskName)?.files ?? [];
     const s = new Set<string>();
-    t.files.forEach((f) => s.add(f.split("/")[0]));
+    files.forEach((f) => s.add(f.split("/")[0]));
     return [...s].sort();
   }, [tasks, taskName]);
 
@@ -322,7 +338,16 @@ export default function GraphView() {
       setTaskName(t.name);
       setDiffMode(null);
       setSelected(null);
-      let all = filterFlavor([...t.files].sort(), flavor);
+      const cache = taskFiles[t.name] ?? t.files ?? [];
+      if (!cache.length) {
+        // 列表接口只给数量，这里按需拉一次该任务的清单
+        void filesOf(t.name).then((files) => {
+          if (!files.length) { setError("该任务目录下还没有 .mlir IR（pass_ir 尚未产出）"); setRemote(null); return; }
+          selectTask({ ...t, files }, flavor, dir);
+        });
+        return;
+      }
+      let all = filterFlavor([...cache].sort(), flavor);
       // 一个任务里有多个 dump 目录（如 ir/ 与 ir-default/ 两个编译变体）时按目录过滤
       const dirs = [...new Set(all.map((f) => f.split("/")[0]))].sort();
       const useDir = dir ?? (dirs.includes("ir") ? "ir" : dirs[0] ?? "");
@@ -764,7 +789,7 @@ export default function GraphView() {
           <option value="">{tasks.length ? "选择任务…" : "（未发现任务）"}</option>
           {tasks.map((t) => (
             <option key={t.name} value={t.name}>
-              {t.name}{t.files.length ? " (" + t.files.length + " IR)" : ""}
+              {t.name}{(t.fileCount ?? t.files?.length) ? " (" + (t.fileCount ?? t.files?.length) + " IR)" : ""}
             </option>
           ))}
         </select>

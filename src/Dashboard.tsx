@@ -573,9 +573,9 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
               {selRunning && <Tag color="processing" variant="outlined">跟随最新 · 5s</Tag>}
             </Space>
             <Space size={8}>
-              {detail && (detail.files?.length ?? 0) > 0 && (
+              {detail && (detail.fileCount ?? 0) > 0 && (
                 <Button size="small" onClick={() => onOpenGraph(selected)}>
-                  在 IR 图谱中查看 {detail?.files?.length ?? 0} 个 pass dump →
+                  在 IR 图谱中查看 {detail?.fileCount ?? 0} 个 pass dump →
                 </Button>
               )}
               <Pagination
