@@ -270,3 +270,18 @@ button.more { margin-top: 8px; align-self: center; }
 .tasktable tr.isqueued { cursor: default; }
 .tasktable tr.isqueued td.branch { color: #cbb287; }
 .badge.st-queued { color: #ffcc80; background: #241a08; border: 1px solid #5c4514; }
+
+/* 历史表：不分页滚动、页码按钮右下角 */
+.tablewrap.histtable { max-height: none; overflow: visible; }
+.histfoot { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 12px; }
+.histfoot select { background: #0d1117; color: #c9d6e3; border: 1px solid #232c3b; border-radius: 6px; padding: 2px 6px; font-size: 12px; margin: 0 4px; }
+.pagerbar { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.pbtn {
+  min-width: 28px; height: 26px; padding: 0 7px;
+  background: #10151d; color: #9fb0c4; border: 1px solid #232c3b; border-radius: 6px;
+  font-size: 12px; cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.pbtn:hover:not(:disabled) { color: #dbe2ea; border-color: #2c4a66; }
+.pbtn.on { background: #23405e; border-color: #4dd0e1; color: #4dd0e1; font-weight: 600; }
+.pbtn:disabled { opacity: 0.4; cursor: default; }
+.pdots { color: #55677e; padding: 0 2px; user-select: none; }

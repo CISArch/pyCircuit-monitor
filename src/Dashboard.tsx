@@ -94,7 +94,7 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [branchFilter, setBranchFilter] = useState("");
   const [histPage, setHistPage] = useState(1);
-  const [histPageSize, setHistPageSize] = useState(50);
+  const [histPageSize, setHistPageSize] = useState(10);
   const logStateRef = useRef<LogPage | null>(null);
   logStateRef.current = logPage;
   const logPageSizeRef = useRef(100);
@@ -219,6 +219,22 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
   const histPageSafe = Math.min(Math.max(histPage, 1), histPages);
   const pageRows = rows.slice((histPageSafe - 1) * histPageSize, histPageSafe * histPageSize);
   const histFrom = rows.length ? (histPageSafe - 1) * histPageSize + 1 : 0;
+  // 页码序列：首尾 + 当前±1，间隔处用省略号，形状形如 < 1 2 3 4 … 12 >
+  const pageButtons = useMemo(() => {
+    const keep = new Set<number>();
+    for (const n of [1, histPages, histPageSafe - 1, histPageSafe, histPageSafe + 1]) {
+      if (n >= 1 && n <= histPages) keep.add(n);
+    }
+    if (histPageSafe <= 3) for (let n = 2; n <= Math.min(5, histPages); n++) keep.add(n);
+    if (histPageSafe >= histPages - 2) for (let n = Math.max(1, histPages - 4); n < histPages; n++) keep.add(n);
+    const sorted = [...keep].sort((a, b) => a - b);
+    const out: (number | "dots")[] = [];
+    sorted.forEach((n, i) => {
+      if (i > 0 && n - sorted[i - 1] > 1) out.push("dots");
+      out.push(n);
+    });
+    return out;
+  }, [histPageSafe, histPages]);
   const histTo = Math.min(histPageSafe * histPageSize, rows.length);
 
   // 同分支历史趋势（当前选中任务）
@@ -290,7 +306,7 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
             <span className="dim">点击查看实时日志 →</span>
           </div>
         )}
-        <div className="tablewrap">
+        <div className="tablewrap histtable">
           <table className="tasktable">
             <thead>
               <tr>
@@ -333,18 +349,29 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void 
             </tbody>
           </table>
         </div>
-        <div className="logpager histpager">
-          <button className="mini" disabled={histPageSafe <= 1} onClick={() => setHistPage(1)}>首页</button>
-          <button className="mini" disabled={histPageSafe <= 1} onClick={() => setHistPage(histPageSafe - 1)}>◀ 上一页</button>
-          <span className="dim">第 <b className="pgv">{histPageSafe}</b> / {histPages} 页 · {histFrom}–{histTo} / 共 {rows.length} 条</span>
-          <button className="mini" disabled={histPageSafe >= histPages} onClick={() => setHistPage(histPageSafe + 1)}>下一页 ▶</button>
-          <button className="mini" disabled={histPageSafe >= histPages} onClick={() => setHistPage(histPages)}>末页</button>
-          <select value={histPageSize} onChange={(e) => setHistPageSize(Number(e.target.value))} title="每页条数">
-            <option value={25}>25 条/页</option>
-            <option value={50}>50 条/页</option>
-            <option value={100}>100 条/页</option>
-            <option value={200}>200 条/页</option>
-          </select>
+        <div className="histfoot">
+          <span className="dim">
+            共 {rows.length} 条 · 第 {histFrom}–{histTo} 条 · 每页
+            <select value={histPageSize} onChange={(e) => setHistPageSize(Number(e.target.value))} title="每页条数">
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+            条
+          </span>
+          <span className="pagerbar">
+            <button className="pbtn" disabled={histPageSafe <= 1} title="上一页"
+              onClick={() => setHistPage(histPageSafe - 1)}>‹</button>
+            {pageButtons.map((p, i) =>
+              p === "dots"
+                ? <span key={"d" + i} className="pdots">…</span>
+                : <button key={p} className={"pbtn" + (p === histPageSafe ? " on" : "")}
+                    onClick={() => setHistPage(p)}>{p}</button>,
+            )}
+            <button className="pbtn" disabled={histPageSafe >= histPages} title="下一页"
+              onClick={() => setHistPage(histPageSafe + 1)}>›</button>
+          </span>
         </div>
       </div>
       {/* ============ 任务详情 ============ */}
