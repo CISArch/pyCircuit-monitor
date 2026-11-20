@@ -31,7 +31,7 @@ export default function Best(props: { onOpenTask: (task: string) => void }) {
       }
     };
     void load();
-    const t = setInterval(() => void load(), 15000);
+    const t = setInterval(() => { if (!document.hidden) void load(); }, 15000);
     return () => { alive = false; clearInterval(t); };
   }, []);
 

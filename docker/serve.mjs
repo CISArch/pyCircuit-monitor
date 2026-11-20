@@ -4,6 +4,7 @@
 // dev/preview server). Static-file serving stays local to this file.
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { createGzip } from 'node:zlib'
 import { extname, join, resolve, sep } from 'node:path'
 import { autoPerfApi } from '../server/api.ts'
 
@@ -37,10 +38,20 @@ function serveStatic(req, res, pathname) {
     return createReadStream(index).pipe(res)
   }
   const hashed = /-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/.test(full)
-  res.writeHead(200, {
-    'Content-Type': MIME[extname(full)] || 'application/octet-stream',
+  const type = MIME[extname(full)] || 'application/octet-stream'
+  const gzippable = /^(text\/|application\/(json|javascript))/.test(type)
+  const acceptsGzip = String(req.headers['accept-encoding'] || '').includes('gzip')
+  const headers = {
+    'Content-Type': type,
     'Cache-Control': hashed ? 'public, max-age=31536000, immutable' : 'no-cache',
-  })
+    Vary: 'Accept-Encoding',
+  }
+  // JS/CSS/HTML 体积大（bundle ~2.4 MB），按需流式 gzip，省流量
+  if (gzippable && acceptsGzip && statSync(full).size > 1024) {
+    res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip' })
+    return createReadStream(full).pipe(createGzip()).pipe(res)
+  }
+  res.writeHead(200, headers)
   createReadStream(full).pipe(res)
 }
 

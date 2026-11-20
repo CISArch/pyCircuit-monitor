@@ -192,12 +192,13 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
 
   useEffect(() => {
     void refresh();
-    const t1 = setInterval(() => void refresh(), 10000);
+    // 标签页不可见时不轮询：省流量，也不空转服务端
+    const t1 = setInterval(() => { if (!document.hidden) void refresh(); }, 10000);
     const t2 = setInterval(
-      () => void fetchHealth().then((h) => setHealth(h ?? { ok: false, error: "无法连接机器人" })),
+      () => { if (!document.hidden) void fetchHealth().then((h) => setHealth(h ?? { ok: false, error: "无法连接机器人" })); },
       5000,
     );
-    const t3 = setInterval(() => void fetchQueue().then((q) => q && setQueue(q)), 10000);
+    const t3 = setInterval(() => { if (!document.hidden) void fetchQueue().then((q) => q && setQueue(q)); }, 10000);
     void fetchQueue().then((q) => q && setQueue(q));
     return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3); };
   }, [refresh]);
@@ -260,7 +261,9 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
     if (!selected) { setDetail(null); setLogPage(null); return; }
     void loadDetail(selected);
     const running = tasks.find((t) => t.name === selected && !t.hasResult);
-    const t = setInterval(() => { if (running) void loadDetail(selected); }, running ? 5000 : 15000);
+    const t = setInterval(() => {
+      if (!document.hidden && running) void loadDetail(selected);
+    }, running ? 5000 : 15000);
     return () => clearInterval(t);
   }, [selected, loadDetail]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -289,6 +292,7 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
   useEffect(() => {
     if (!selected || !selRunning) return;
     const t = setInterval(() => {
+      if (document.hidden) return;
       const st = logPageRef.current;
       if (!st || st.page >= st.totalPages) void loadLog(selected, "last", logPageSize);
     }, 5000);
@@ -361,7 +365,7 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
     { title: "总时长", width: 88, align: "right", render: (_: unknown, r) => fmtDur(r.totalSeconds ?? null) },
     {
       title: "IR", width: 76, align: "center",
-      render: (_: unknown, r) => (r.files.length > 0 && !r.queued
+      render: (_: unknown, r) => ((r.fileCount ?? 0) > 0 && !r.queued
         ? <Button size="small" onClick={(e) => { e.stopPropagation(); onOpenGraph(r.name); }}>图谱</Button>
         : <span style={{ opacity: 0.4 }}>—</span>),
     },
@@ -569,9 +573,9 @@ export default function Dashboard(props: { onOpenGraph: (task?: string) => void;
               {selRunning && <Tag color="processing" variant="outlined">跟随最新 · 5s</Tag>}
             </Space>
             <Space size={8}>
-              {detail && detail.files.length > 0 && (
+              {detail && (detail.files?.length ?? 0) > 0 && (
                 <Button size="small" onClick={() => onOpenGraph(selected)}>
-                  在 IR 图谱中查看 {detail.files.length} 个 pass dump →
+                  在 IR 图谱中查看 {detail?.files?.length ?? 0} 个 pass dump →
                 </Button>
               )}
               <Pagination

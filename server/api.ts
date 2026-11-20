@@ -11,6 +11,8 @@
 //   GET queue                      pending/running rows from the state DB (optional)
 //   GET file|head|count            .mlir access for the IR graph view
 import { createReadStream } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { gzip } from 'node:zlib'
 import { readFile, readdir, stat, open as openFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
@@ -148,10 +150,33 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
     ? join(homedir(), stateDbRaw.slice(1))
     : stateDbRaw
 
-  const json = (res: any, code: number, body: unknown) => {
+  /** 带 ETag 的 JSON 响应：内容未变时回 304（浏览器不重复下载），
+   *  较大响应体按需 gzip——按流量计费的链路上省量最明显。 */
+  const json = (res: any, code: number, body: unknown, req?: any) => {
+    const payload = JSON.stringify(body)
+    const etag = '"' + createHash('sha1').update(payload).digest('base64url').slice(0, 20) + '"'
+    res.setHeader('ETag', etag)
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Vary', 'Accept-Encoding')
+    if (req?.headers?.['if-none-match'] === etag) {
+      res.statusCode = 304
+      res.end()
+      return
+    }
+    const accepts = String(req?.headers?.['accept-encoding'] ?? '').includes('gzip')
+    if (req && accepts && payload.length > 2048) {
+      gzip(payload, (err: any, buf: Buffer) => {
+        res.statusCode = code
+        res.setHeader('Content-Type', 'application/json; charset=utf-8')
+        if (err) { res.end(payload); return }
+        res.setHeader('Content-Encoding', 'gzip')
+        res.end(buf)
+      })
+      return
+    }
     res.statusCode = code
     res.setHeader('Content-Type', 'application/json; charset=utf-8')
-    res.end(JSON.stringify(body))
+    res.end(payload)
   }
 
   /** Resolve a (task, rel path) pair under the log root; null on escape. */
@@ -180,13 +205,14 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
       const dir = join(logRoot, name)
       const st = await stat(dir).catch(() => null)
       if (!st?.isDirectory()) continue
+      // 列表只给数量：完整清单（每任务数百条）由 /task 按需取
       const files: string[] = []
       await findMlirFiles(dir, '', files)
       const task: any = {
         name,
         mtime: st.mtimeMs,
         ts: tsFromTaskName(name),
-        files,
+        fileCount: files.length,
       }
       const resultFile = join(dir, 'result.json')
       const rstat = await stat(resultFile).catch(() => null)
@@ -423,22 +449,22 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
     if (!url.pathname.startsWith('/api/autoperf/')) return next()
 
     if (url.pathname === '/api/autoperf/tasks') {
-      void getTasks().then((body) => json(res, 200, body))
+      void getTasks().then((body) => json(res, 200, body, req))
       return
     }
 
     if (url.pathname === '/api/autoperf/health') {
-      void getHealth().then((body) => json(res, 200, body))
+      void getHealth().then((body) => json(res, 200, body, req))
       return
     }
 
     if (url.pathname === '/api/autoperf/queue') {
-      void getQueue().then((body) => json(res, 200, body))
+      void getQueue().then((body) => json(res, 200, body, req))
       return
     }
 
     if (url.pathname === '/api/autoperf/refs') {
-      void getRefs().then((body) => json(res, 200, body))
+      void getRefs().then((body) => json(res, 200, body, req))
       return
     }
 
@@ -500,7 +526,7 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
 
     if (url.pathname === '/api/autoperf/best') {
       void getBest()
-        .then((body) => json(res, 200, body))
+        .then((body) => json(res, 200, body, req))
         .catch((e) => json(res, 200, { available: false, error: String(e?.message ?? e) }))
       return
     }
@@ -538,7 +564,7 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
           logMtime: lg?.mtimeMs ?? null,
           files,
           entries,
-        })
+        }, req)
       })()
       return
     }
@@ -584,7 +610,7 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
                 pageSize,
                 startLine: start + 1,
                 lines: all.slice(start, start + pageSize),
-              })
+              }, req)
             }
             // legacy full-text mode
             return json(res, 200, { path: file, size: st.size, truncated, text })

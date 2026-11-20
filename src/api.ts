@@ -4,7 +4,8 @@ export interface TaskSummary {
   name: string;
   mtime: number;
   ts: string | null;
-  files: string[];
+  fileCount?: number;
+  files?: string[];
   hasResult: boolean;
   status?: string | null;
   stage?: string | null;
@@ -67,7 +68,8 @@ export interface TaskDetail {
   logTail: string;
   logSize: number;
   logMtime: number | null;
-  files: string[];
+  fileCount?: number;
+  files?: string[];
   entries: string[];
 }
 
