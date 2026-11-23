@@ -1,6 +1,7 @@
 import { Alert, Button, Card, Input, Space, Table, Tag, Tooltip, Typography, theme } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
+import PVChart from "./PVChart";
 import { fmtNum, fmtTime, type BestEntry } from "./api";
 
 const STATUS_TAG: Record<string, { label: string; color: string }> = {
@@ -15,12 +16,17 @@ export default function Best(props: { onOpenTask: (task: string) => void }) {
   const [data, setData] = useState<{ total: number; tested: number; entries: BestEntry[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [curve, setCurve] = useState<{ ts: string; pv: number; branch: string; sha: string; task: string }[]>([]);
 
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const r = await fetch("/api/autoperf/best");
+        const [r, cr] = await Promise.all([fetch("/api/autoperf/best"), fetch("/api/autoperf/pvcurve")]);
+        if (cr.ok) {
+          const cd = await cr.json();
+          if (alive && Array.isArray(cd?.points)) setCurve(cd.points);
+        }
         const d = await r.json();
         if (!alive) return;
         if (d?.available === false) { setError(d.error ?? "状态库不可读"); return; }
@@ -87,8 +93,51 @@ export default function Best(props: { onOpenTask: (task: string) => void }) {
     },
   ];
 
+  const chartPoints = useMemo(
+    () => curve.map((c) => ({
+      x: Date.parse(c.ts),
+      y: c.pv,
+      name: c.task,
+      status: "pass",
+      ts: fmtTime(c.ts),
+      branch: c.branch,
+      sha: c.sha,
+    })),
+    [curve],
+  );
+
   return (
-    <Card
+    <Space orientation="vertical" size={14} style={{ width: "100%" }}>
+      {chartPoints.length > 1 && (
+        <Card
+          size="small"
+          title={
+            <Space size={10} wrap>
+              <span>历史最高 P/V 曲线</span>
+              <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+                {curve.length} 次刷新纪录 · 峰值 {fmtNum(curve[curve.length - 1]?.pv ?? 0, 3)}×
+              </Typography.Text>
+            </Space>
+          }
+        >
+          <PVChart
+            points={chartPoints}
+            title="按测试时间累计的最高 P/V（仅标出刷新纪录的提交，点击可查看该任务）"
+            color={token.colorPrimary}
+            mutedColor={token.colorTextSecondary}
+            borderColor={token.colorBorderSecondary}
+            selected={null}
+            onSelect={(task) => props.onOpenTask(task)}
+            step
+            yLabel="P/V"
+            pointLabel={(p) => {
+              const c = curve.find((x) => x.task === p.name);
+              return (p.ts ?? "") + "\nP/V " + fmtNum(p.y, 3) + "\n" + (c?.branch ?? "") + (c?.sha ? " @" + c.sha.slice(0, 8) : "");
+            }}
+          />
+        </Card>
+      )}
+      <Card
       size="small"
       title={
         <Space size={10} wrap>
@@ -124,6 +173,7 @@ export default function Best(props: { onOpenTask: (task: string) => void }) {
         onRow={(e) => ({ onClick: () => { if (e.taskDir) props.onOpenTask(e.taskDir); }, style: { cursor: e.taskDir ? "pointer" : "default" } })}
         rowClassName={(e) => (e.rank === 1 ? "row-top1" : e.tested ? "" : "row-untested")}
       />
-    </Card>
+      </Card>
+    </Space>
   );
 }

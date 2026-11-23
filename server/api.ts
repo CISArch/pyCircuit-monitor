@@ -505,6 +505,27 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
       return
     }
 
+    // 历史最高 P/V 纪录曲线：按测试时间排序，只保留刷新最高值的点（阶跃）
+    if (url.pathname === '/api/autoperf/pvcurve') {
+      void getTasks()
+        .then((body: any) => {
+          const rows = (body.tasks ?? [])
+            .filter((t: any) => t.hasResult && typeof t.gmPV === 'number' && t.ts)
+            .sort((a: any, b: any) => Date.parse(a.ts) - Date.parse(b.ts))
+          const points: any[] = []
+          let best = -Infinity
+          for (const t of rows) {
+            if (t.gmPV <= best) continue
+            best = t.gmPV
+            points.push({ ts: t.ts, pv: t.gmPV, branch: t.branch ?? '', sha: t.sha ?? '', task: t.name })
+          }
+          return { total: rows.length, points }
+        })
+        .then((body) => json(res, 200, body, req))
+        .catch((e) => json(res, 200, { total: 0, points: [], error: String(e?.message ?? e) }))
+      return
+    }
+
     if (url.pathname === '/api/autoperf/best') {
       void getBest()
         .then((body) => json(res, 200, body, req))
