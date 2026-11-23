@@ -3,11 +3,12 @@
 pyCircuit 的**测试监控台 + IR 可视化**统一前端。前身 pyCircuit-graph（仓库已更名，
 旧 URL 自动重定向），IR 图谱保留为其中一个功能页，新增 auto_perf 实时监控台首页。
 
-三个功能页（顶部导航切换，URL `?view=` 持久化）：
+四个功能页（顶部导航切换，URL `?view=` 持久化）：
 
 1. **监控台（默认首页）** — auto_perf 测试机器人（DavinciBaseLine，HTTP :8790）的实时状态、历史与结果
 2. **最佳** — 迁移自飞书机器人 `最佳` 命令：各远端分支按 P/V ratio 从大到小排名（见下）
-3. **IR 图谱** — 原有 pyc MLIR use-def 图可视化（pass 时间线 / diff）
+3. **流水线** — auto_perf 三条流水线（perf / mt / backend）的配置：多线程档位与后端综合（`?view=pipelines`）
+4. **IR 图谱** — 原有 pyc MLIR use-def 图可视化（pass 时间线 / diff）
 
 ## 监控台（Dashboard）
 
@@ -19,12 +20,16 @@ pyCircuit 的**测试监控台 + IR 可视化**统一前端。前身 pyCircuit-g
   把尚未开始的任务以「排队」行并入历史表；表格顺序 = 排队 → 运行中 → 已结束，组内按时间倒序
   （最后入队的排最前）；运行中任务的分支/SHA 由状态库按目录名尾部 sha8 反查补正；
   时间统一显示为 `11/20 10:09:12`。排队行无日志、不可点开。
-- **历史列表（页面首屏）**：全部 `task-*` 目录（含 result.json 摘要：状态 / 分支 / SHA /
-  P/V 与 cycle/s 几何均值 / MATCH 数 / 耗时），状态与分支过滤，10s 自动刷新；
+- **历史列表（页面首屏）**：全部 `task-*` 目录（含 result.json 摘要：类型 / 状态 / 分支 / SHA /
+  摘要指标 · cycle/s 几何均值 / MATCH 数 / 耗时），状态 / 类型 / 分支过滤，10s 自动刷新；
+  流水线列区分**性能**（perf，目录名无后缀）、**多线程**（mt，`-mt` 后缀）、**后端**（backend，`-backend` 后缀），
+  摘要列按流水线显示各自的主指标（perf=P/V、mt=最佳加速比、backend=Vivado LUT 或「工具不可用」）；
   分页浏览（默认 10 条/页，可选 10/20/50/100；表体不滚动，页码按钮在右下角，形如 `< 1 2 3 4 … 12 >`），标题行内嵌机器人在线状态与
   运行/排队/各状态计数，运行中任务以一条提示条置顶。
-- **任务详情**（位于顶部状态卡与历史表之间，选中即滚入视野；首屏自动选中运行中任务）：逐 trace 双后端对比表（cycle/s / Verilator cycle/s / P/V / MATCH）、
-  同分支 P/V 与 cycle/s 走势图（内联 SVG，可点击跳转）、execution.log 分页查看（带行号整页翻页，无内部滚动条；默认末页，运行中任务 5s 跟随最新页）、
+- **任务详情**（位于顶部状态卡与历史表之间，选中即滚入视野；首屏自动选中运行中任务）：按流水线分支渲染——
+  perf 为逐 trace 双后端对比表（cycle/s / Verilator cycle/s / P/V / MATCH）+ 同分支 P/V 走势图；
+  mt 为 trace × 线程档矩阵 + 最佳档/加速比摘要；backend 为 Yosys 资源与 Vivado 实现两个区块（见「流水线」一节）。
+  三者都有 execution.log 分页查看（带行号整页翻页，无内部滚动条；默认末页，运行中任务 5s 跟随最新页）与
   一键「在 IR 图谱中查看」该任务的 pass dump 时间线。
 
 ### 手动提测
@@ -33,20 +38,51 @@ pyCircuit 的**测试监控台 + IR 可视化**统一前端。前身 pyCircuit-g
 （带分支名补全，数据来自机器人 `remote_refs`），回车或点「提交测试」即调用机器人
 Local API 入队；成功后提示 `已入队：<分支> @<sha8>（task <id>）`，失败（分支/哈希不存在、
 格式不对、机器人不可达）以红色块给出机器人返回的**原始错误**（含候选分支清单）。
-接口：`POST /api/autoperf/submit {commit}`（服务端转发到 `:8790/api/tasks`，含自动回调地址）。
+可选「流水线」多选框指定只跑哪几条（默认 `auto` = 全部）；响应带回机器人返回的
+`tasks:[{pipeline,task_id}]` 与 `warnings`，多流水线一次性入队时成功提示会逐条列出。
+接口：`POST /api/autoperf/submit {commit, pipelines?}`（`pipelines` 为 `"auto"` 或
+`["perf","mt","backend"]` 子集；服务端转发到 `:8790/api/tasks`，含自动回调地址）。
 
 ### API（dev 与容器共用 `server/api.ts`，零 npm 依赖）
 
 - `GET /api/autoperf/tasks` — 任务列表 + result.json 摘要（gmCps/gmPV/MATCH/耗时，3s 缓存）
 - `GET /api/autoperf/task?name=<dir>` — 完整 result.json + execution.log 尾部 + 文件清单
-- `GET /api/autoperf/log?task=<dir>&path=<rel>&page=<N|last>&lines=<M>` — 日志分页读取（.log/.txt/.json/.csv；页码 1 起或 `last`=末页，每页 20–500 行，按 8MB 尾部窗口计页；不带 page 参数返回全文 text）
-- `GET /api/autoperf/health` — 代理机器人 `/api/health`（`AUTO_PERF_API_BASE`，默认 `127.0.0.1:8790`）
+- `GET /api/autoperf/log?task=<dir>&path=<rel>&page=<N|last>&lines=<M>` — 日志分页读取（.log/.txt/.json/.csv/.rpt；页码 1 起或 `last`=末页，每页 20–500 行，按 8MB 尾部窗口计页；不带 page 参数返回全文 text）
+- `GET /api/autoperf/health` — 代理机器人 `/api/health`（`AUTO_PERF_API_BASE`，默认 `127.0.0.1:8790`），透传 `counts` / `counts_by_pipeline` / `tools`
+- `GET|PUT /api/autoperf/pipelines` — 代理机器人 `/api/pipelines`（GET 读 `{revision,pipelines,tools}`；PUT 带 `expected_revision` 保存 mt/backend 配置，400 校验失败 / 409 revision 冲突**原样透传**）
+- `POST /api/autoperf/pipelines/probe` — 代理机器人 `/api/pipelines/probe`，检测后端工具（Vivado/Yosys）版本与可用性
 - `GET /api/autoperf/queue` — 机器人 SQLite 状态库的 pending/running 明细（可选，容器内不可用时返回 `available:false`）
 - `GET /api/autoperf/file|head|count?task=<name>&path=<rel>` — .mlir 读取（大文件流式，见 IR 图谱一节）
 - `GET /api/autoperf/taskfiles?task=<name>` — 单任务的 pass dump 清单（IR 页按需取，列表接口只给 `fileCount`）
 - **省流量**：轮询接口（tasks/task/log/queue/best/refs/health）均带 `ETag`，配合 `If-None-Match` 在内容未变时返回 `304`（0 字节）；>2 KB 的 JSON 与静态 JS/CSS/HTML 按 `Accept-Encoding` 做 gzip；哈希文件名走 `immutable` 一年缓存；页面隐藏时前端暂停轮询。
 - `GET /api/autoperf/queue` — 排队/运行中明细（读机器人状态库；只读挂载下用临时副本读取，3s 缓存）
 - 均有路径校验，禁止越出日志根目录。
+
+## 流水线（三条流水线配置）
+
+auto_perf 除原有 perf 流水线外新增两条：**mt**（同一 trace 在 1/2/4/8… 线程档下跑 cycle/s
+矩阵，给出最佳档与加速比）与 **backend**（Yosys 资源统计 + Vivado 综合/实现，
+LUT/FF/BRAM/DSP 与 WNS/TNS）。两条都按**分支名正则**匹配是否执行，目录名分别加 `-mt` / `-backend` 后缀。
+
+配置页（顶部「流水线」）分三个区块：
+
+- **主线（性能）** — 只读说明，perf 行为不变；
+- **多线程** — 启用开关、正则多行输入（一行一条，`#` 开头为注释）、**测试命中**（用机器人
+  `remote_refs` 的分支列表在浏览器本地跑 `RegExp`，非法正则就地报错、不发请求）、线程档位
+  （逗号分隔，如 `1,2,4,8`）、超时秒数；
+- **后端综合** — 启用开关、正则、part（默认 `xc7z020clg400-1`）、时钟 ns（默认 10）、
+  top（默认 `v5_superscalar_v5_core`）、directive、整体超时（默认 14400s）、Vivado 路径、
+  license、max_threads、Yosys（路径/超时/Nangate45 面积开关）、仅综合开关，
+  **检测工具**调用 probe 显示版本或错误原文。
+
+页面顶部显示三条流水线的运行/排队计数与最近一次结果（复用 `tasks` 列表按 pipeline 过滤）。
+保存走 `PUT /api/autoperf/pipelines`（带 `revision`），成功后按机器人返回刷新；
+`409` 提示先「刷新」再保存，`400` 直接显示后端错误文本。
+
+任务详情按流水线分支渲染：perf 保持逐 trace 双后端表 + P/V 走势；mt 为 `trace × 线程档`
+cycle/s 矩阵（另列最佳加速比与 MATCH）+ 最佳档摘要；backend 为 Yosys 资源（总 cells、DFF、
+memories、wire bits、cell 类型 Top N、可选 Nangate45 面积）与 Vivado（LUT/FF/BRAM/DSP、WNS/TNS、
+报告路径）两个区块；日志分页三者一致。
 
 ## 最佳（各分支排名）
 

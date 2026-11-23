@@ -6,8 +6,10 @@
 // Endpoints under /api/autoperf/:
 //   GET tasks                      task list + result.json summary (cached 3s)
 //   GET task?name=<dir>            full result.json + execution.log tail + files
-//   GET log?task=<dir>&path=<rel>  raw text of a .log/.txt/.json/.csv file
+//   GET log?task=<dir>&path=<rel>  raw text of a .log/.txt/.json/.csv/.rpt file
 //   GET health                     proxy of the auto_perf bot /api/health
+//   GET|PUT pipelines              proxy of the bot /api/pipelines (perf/mt/backend)
+//   POST pipelines/probe           proxy of the bot /api/pipelines/probe (tool check)
 //   GET queue                      pending/running rows from the state DB (optional)
 //   GET file|head|count            .mlir access for the IR graph view
 import { createReadStream } from 'node:fs'
@@ -44,6 +46,23 @@ function tsFromTaskName(name: string): string | null {
   return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`
 }
 
+/** auto_perf 的三条流水线；旧任务目录无后缀、result.json 无 pipeline 字段 → perf。 */
+export type Pipeline = 'perf' | 'mt' | 'backend'
+
+/** 目录名尾部形态：`-<sha8>`（perf）或 `-<sha8>-mt|-backend`。 */
+function taskNameMeta(name: string): { sha8: string; pipeline: Pipeline } {
+  const m = /-([0-9a-f]{8})(?:-(mt|backend))?$/.exec(name)
+  const suffix = m?.[2]
+  return {
+    sha8: m?.[1] ?? name.slice(-8),
+    pipeline: suffix === 'mt' || suffix === 'backend' ? suffix : 'perf',
+  }
+}
+
+function asPipeline(v: unknown): Pipeline | null {
+  return v === 'perf' || v === 'mt' || v === 'backend' ? v : null
+}
+
 async function findMlirFiles(dir: string, base: string, out: string[], depth = 0): Promise<void> {
   if (depth > 4) return
   let entries: import('node:fs').Dirent[]
@@ -59,7 +78,7 @@ async function findMlirFiles(dir: string, base: string, out: string[], depth = 0
   }
 }
 
-function summarizeResult(result: any): Record<string, unknown> {
+function summarizeResult(result: any, namePipeline: Pipeline): Record<string, unknown> {
   const rows: any[] = Array.isArray(result?.rows) ? result.rows : []
   const cps: number[] = []
   const pv: number[] = []
@@ -71,7 +90,11 @@ function summarizeResult(result: any): Record<string, unknown> {
     }
     if (r?.common_metrics_match) matchN++
   }
+  const mt = result?.mt ?? null
+  const backend = result?.backend ?? null
+  const utilization = backend?.vivado?.utilization ?? null
   return {
+    pipeline: asPipeline(result?.pipeline) ?? namePipeline,
     status: result?.status ?? null,
     stage: result?.stage ?? null,
     error: result?.error || null,
@@ -87,6 +110,11 @@ function summarizeResult(result: any): Record<string, unknown> {
     compileSeconds: typeof result?.compile_seconds === 'number' ? result.compile_seconds : null,
     matrixSeconds: typeof result?.matrix_seconds === 'number' ? result.matrix_seconds : null,
     areaTop: result?.area_top ?? null,
+    // mt：最佳线程档与加速比（列表摘要列用）
+    bestSpeedup: typeof mt?.best_speedup === 'number' ? mt.best_speedup : null,
+    bestThreads: typeof mt?.best_threads === 'number' ? mt.best_threads : null,
+    // backend：Vivado LUT（无则列表显示「工具不可用」）
+    vivadoLut: typeof utilization?.lut === 'number' ? utilization.lut : null,
   }
 }
 
@@ -189,18 +217,21 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
       // 列表只给数量：完整清单（每任务数百条）由 /task 按需取
       const files: string[] = []
       await findMlirFiles(dir, '', files)
+      const meta = taskNameMeta(name)
       const task: any = {
         name,
         mtime: st.mtimeMs,
         ts: tsFromTaskName(name),
         fileCount: files.length,
+        pipeline: meta.pipeline,
+        sha8: meta.sha8,
       }
       const resultFile = join(dir, 'result.json')
       const rstat = await stat(resultFile).catch(() => null)
       if (rstat?.isFile()) {
         try {
           const parsed = JSON.parse(await readFile(resultFile, 'utf-8'))
-          Object.assign(task, { hasResult: true }, summarizeResult(parsed))
+          Object.assign(task, { hasResult: true }, summarizeResult(parsed, meta.pipeline))
         } catch {
           task.hasResult = false
         }
@@ -244,7 +275,13 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
         const r = await fetch(`${apiBase}/api/health`, { signal: ac.signal })
         if (!r.ok) return { ok: false, error: 'bot HTTP ' + r.status }
         const d = (await r.json()) as any
-        return { ok: true, counts: d.counts ?? {} }
+        // 三条流水线：计数按流水线拆分 + 工具可用性（Vivado/Yosys）一并透传
+        return {
+          ok: true,
+          counts: d.counts ?? {},
+          counts_by_pipeline: d.counts_by_pipeline ?? {},
+          tools: d.tools ?? {},
+        }
       } finally {
         clearTimeout(timer)
       }
@@ -291,14 +328,17 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
   }
 
   async function readQueueRows(): Promise<any> {
-    return withStateDb((db) =>
-      db
+    return withStateDb((db) => {
+      // 三条流水线后状态库多出 pipeline 列；旧库没有该列时退回原查询
+      const cols = (db.prepare('PRAGMA table_info(tasks)').all() as any[]).map((c) => c.name)
+      const pipelineCol = cols.includes('pipeline') ? ', pipeline' : ''
+      return db
         .prepare(
-          `SELECT delivery_id, branch, sha, status, created_at, started_at
+          `SELECT delivery_id, branch, sha, status, created_at, started_at${pipelineCol}
            FROM tasks WHERE status IN ('pending','running') ORDER BY id`,
         )
-        .all(),
-    )
+        .all()
+    })
   }
 
   async function computeQueue(): Promise<any> {
@@ -353,8 +393,17 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
       const pick = db.prepare(
         `SELECT id, status, finished_at, started_at, result_json FROM tasks
          WHERE branch = ? AND sha = ? AND status IN ('pass','partial','fail','timeout')
-         ORDER BY id DESC LIMIT 1`,
+         ORDER BY id DESC LIMIT 20`,
       )
+      // 同一 SHA 可能同时有 perf/mt/backend 三个任务；P/V 排名只取 perf 那条
+      const pickPerf = (branch: string, sha: string): { rec: any; result: any } | null => {
+        for (const rec of pick.all(branch, sha) as any[]) {
+          let result: any = null
+          try { result = JSON.parse(rec.result_json) } catch { /* ignore */ }
+          if ((asPipeline(result?.pipeline) ?? 'perf') === 'perf') return { rec, result }
+        }
+        return null
+      }
       const mean = (rows: any[], key: string, skip?: string): number | null => {
         const vals: number[] = []
         for (const r of rows) {
@@ -365,10 +414,10 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
         return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
       }
       const entries = refs.map((ref: any) => {
-        const rec = pick.get(ref.branch, ref.sha) as any
-        if (!rec) return { branch: ref.branch, sha: ref.sha, tested: false }
-        let result: any = null
-        try { result = JSON.parse(rec.result_json) } catch { /* ignore */ }
+        const hit = pickPerf(ref.branch, ref.sha)
+        if (!hit) return { branch: ref.branch, sha: ref.sha, tested: false }
+        const rec = hit.rec
+        const result = hit.result
         const tr = Array.isArray(result?.rows) ? result.rows : []
         const anyDiff = tr.some((r: any) => r && r.common_metrics_match === false)
         return {
@@ -439,6 +488,48 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
       return
     }
 
+    // 流水线配置：GET 读取 / PUT 保存 / POST probe 检测工具。
+    // 完全透传机器人的状态码与响应体（400 校验失败、409 revision 冲突都原样给前端）。
+    if (url.pathname === '/api/autoperf/pipelines' || url.pathname === '/api/autoperf/pipelines/probe') {
+      const probe = url.pathname.endsWith('/probe')
+      const method = String(req.method ?? 'GET').toUpperCase()
+      if (probe && method !== 'POST') return json(res, 405, { ok: false, error: 'probe 需要 POST' })
+      if (!probe && method !== 'GET' && method !== 'PUT') {
+        return json(res, 405, { ok: false, error: 'pipelines 只支持 GET/PUT' })
+      }
+      void (async () => {
+        let body: string | undefined
+        if (method === 'PUT' || method === 'POST') {
+          try {
+            body = await readBody(req)
+          } catch {
+            return json(res, 400, { ok: false, error: '请求体过大' })
+          }
+        }
+        const ac = new AbortController()
+        const timer = setTimeout(() => ac.abort(), 20000)
+        try {
+          const r = await fetch(`${apiBase}/api/pipelines${probe ? '/probe' : ''}`, {
+            method,
+            headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+            body,
+            signal: ac.signal,
+          })
+          const text = await r.text()
+          res.statusCode = r.status
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-store')
+          res.end(text || '{}')
+        } catch (e: any) {
+          const msg = e?.name === 'AbortError' ? '机器人响应超时（20s）' : String(e?.cause?.code ?? e?.message ?? e)
+          json(res, 502, { ok: false, error: msg })
+        } finally {
+          clearTimeout(timer)
+        }
+      })()
+      return
+    }
+
     if (url.pathname === '/api/autoperf/queue') {
       void getQueue().then((body) => json(res, 200, body, req))
       return
@@ -449,14 +540,16 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
       return
     }
 
-    // 手动提测：转发机器人 Local API（POST /api/tasks + commit），错误原样透传
+    // 手动提测：转发机器人 Local API（POST /api/tasks + commit [+ pipelines]），错误原样透传
     if (url.pathname === '/api/autoperf/submit' && req.method === 'POST') {
       void (async () => {
         let commit = ''
+        let pipelines: unknown
         try {
           const raw = await readBody(req)
           const body = JSON.parse(raw || '{}')
           commit = String(body?.commit ?? '').trim()
+          pipelines = body?.pipelines
         } catch {
           json(res, 400, { ok: false, error: '请求体不是合法 JSON' })
           return
@@ -465,6 +558,14 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
           json(res, 400, { ok: false, error: '请输入分支名或至少 7 位 commit SHA' })
           return
         }
+        // pipelines 缺省 = "auto"（全部流水线）；显式给出时只接受 auto 或
+        // ["perf","mt","backend"] 的子集，其余原样交给机器人校验。
+        if (pipelines !== undefined && pipelines !== 'auto') {
+          if (!Array.isArray(pipelines) || pipelines.some((p) => !asPipeline(p))) {
+            json(res, 400, { ok: false, error: 'pipelines 只接受 "auto" 或 ["perf","mt","backend"] 的子集' })
+            return
+          }
+        }
         const callback = callbackUrlFor(req)
         const ac = new AbortController()
         const timer = setTimeout(() => ac.abort(), 25000)
@@ -472,7 +573,11 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
           const r = await fetch(`${apiBase}/api/tasks`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ commit, callback_url: callback }),
+            body: JSON.stringify({
+              commit,
+              callback_url: callback,
+              ...(pipelines !== undefined ? { pipelines } : {}),
+            }),
             signal: ac.signal,
           })
           const text = await r.text()
@@ -488,6 +593,8 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
             taskId: payload?.task_id ?? null,
             branch: payload?.branch ?? commit,
             sha: payload?.sha ?? null,
+            tasks: payload?.tasks ?? null,
+            warnings: payload?.warnings ?? [],
           })
         } catch (e: any) {
           const msg = e?.name === 'AbortError' ? '机器人响应超时（25s）' : String(e?.message ?? e)
@@ -510,6 +617,8 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
       void getTasks()
         .then((body: any) => {
           const rows = (body.tasks ?? [])
+            // P/V 是 perf 流水线的指标；mt 的基线行虽同结构，但不进 P/V 纪录曲线
+            .filter((t: any) => (t.pipeline ?? 'perf') === 'perf')
             .filter((t: any) => t.hasResult && typeof t.gmPV === 'number' && t.ts)
             .sort((a: any, b: any) => Date.parse(a.ts) - Date.parse(b.ts))
           const points: any[] = []
@@ -574,7 +683,7 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
           name,
           ts: tsFromTaskName(name),
           result,
-          summary: result ? summarizeResult(result) : null,
+          summary: result ? summarizeResult(result, taskNameMeta(name).pipeline) : null,
           logSize: lg?.size ?? 0,
           logMtime: lg?.mtimeMs ?? null,
           fileCount: files.length,
@@ -589,8 +698,8 @@ export function autoPerfApi(opts: AutoPerfApiOptions = {}): Middleware {
       const file = url.searchParams.get('path') ?? ''
       const full = safePath(task, file)
       if (!full) return json(res, 403, { error: 'path escapes log root' })
-      if (!/\.(log|txt|json|jsonl|csv)$/.test(full)) {
-        return json(res, 400, { error: 'only .log/.txt/.json/.jsonl/.csv files' })
+      if (!/\.(log|txt|json|jsonl|csv|rpt)$/.test(full)) {
+        return json(res, 400, { error: 'only .log/.txt/.json/.jsonl/.csv/.rpt files' })
       }
       const CAP = 8 * 1024 * 1024
       const pageRaw = url.searchParams.get('page')

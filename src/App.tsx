@@ -3,16 +3,21 @@ import { useCallback, useState } from "react";
 import Best from "./Best";
 import Dashboard from "./Dashboard";
 import GraphView from "./GraphView";
+import Pipelines from "./Pipelines";
 import { ThemeShell } from "./theme";
 
 declare const __BUILD_ID__: string;
 
-type View = "monitor" | "best" | "graph";
+/** 监控台/最佳/流水线统一内容宽度；IR 图谱保持全宽。 */
+const CONTENT_MAX_WIDTH = 1440;
+
+type View = "monitor" | "best" | "pipelines" | "graph";
 
 function readView(): View {
   const p = new URLSearchParams(location.search);
   if (p.get("view") === "graph") return "graph";
   if (p.get("view") === "best") return "best";
+  if (p.get("view") === "pipelines") return "pipelines";
   if (p.get("task")) return "graph"; // 旧深链 ?task=... 直接进 IR 图谱
   return "monitor";
 }
@@ -56,33 +61,48 @@ function Shell() {
     <Layout style={{ minHeight: "100vh" }}>
       <Layout.Header
         style={{
-          display: "flex", alignItems: "center", gap: 16,
-          paddingInline: 16, height: 52, lineHeight: "52px",
+          padding: 0, height: 52, lineHeight: "52px",
           background: token.colorBgContainer, borderBottom: `1px solid ${token.colorBorderSecondary}`,
         }}
       >
-        <Typography.Text strong style={{ fontSize: 15, color: token.colorPrimary }}>
-          pyCircuit Monitor
-        </Typography.Text>
-        <Segmented
-          value={view}
-          onChange={(v) => switchView(String(v))}
-          options={[
-            { label: "监控台", value: "monitor" },
-            { label: "最佳", value: "best" },
-            { label: "IR 图谱", value: "graph" },
-          ]}
-        />
-        <Space style={{ marginLeft: "auto" }} size={16}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            auto_perf 实时状态 · 历史与结果 · IR pass 可视化 · 构建 {__BUILD_ID__}
+        <div
+          style={{
+            display: "flex", alignItems: "center", gap: 16,
+            maxWidth: view === "graph" ? undefined : CONTENT_MAX_WIDTH,
+            margin: view === "graph" ? undefined : "0 auto",
+            paddingInline: 16, height: "100%",
+          }}
+        >
+          <Typography.Text strong style={{ fontSize: 15, color: token.colorPrimary }}>
+            pyCircuit Monitor
           </Typography.Text>
-        </Space>
+          <Segmented
+            value={view}
+            onChange={(v) => switchView(String(v))}
+            options={[
+              { label: "监控台", value: "monitor" },
+              { label: "最佳", value: "best" },
+              { label: "流水线", value: "pipelines" },
+              { label: "IR 图谱", value: "graph" },
+            ]}
+          />
+          <Space style={{ marginLeft: "auto" }} size={16}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              auto_perf 实时状态 · 历史与结果 · IR pass 可视化 · 构建 {__BUILD_ID__}
+            </Typography.Text>
+          </Space>
+        </div>
       </Layout.Header>
       <Layout.Content style={{ padding: view === "graph" ? 0 : 14, background: token.colorBgLayout }}>
-        {view === "monitor" && <Dashboard onOpenGraph={openGraph} openTask={pendingTask} />}
-        {view === "best" && <Best onOpenTask={openTask} />}
-        {view === "graph" && <GraphView key={graphKey} />}
+        {view === "graph" ? (
+          <GraphView key={graphKey} />
+        ) : (
+          <div style={{ maxWidth: CONTENT_MAX_WIDTH, margin: "0 auto", width: "100%" }}>
+            {view === "monitor" && <Dashboard onOpenGraph={openGraph} openTask={pendingTask} />}
+            {view === "best" && <Best onOpenTask={openTask} />}
+            {view === "pipelines" && <Pipelines onOpenTask={openTask} />}
+          </div>
+        )}
       </Layout.Content>
     </Layout>
   );
